@@ -1,16 +1,16 @@
-# JVM Workbench
+# TraceLogDock
 
 [English](README.en.md) · [文档导航](docs/README.md) · [架构](docs/architecture.md) · [路线图](docs/roadmap.md)
 
 面向多项目、多服务器 Java 微服务的桌面日志与 Arthas 诊断工作台。
 
-> **当前阶段：文档与工程规范初始化。** 本仓库尚未实现桌面 APP、SSH 连接或 Arthas 自动化，没有可下载安装包。下面的产品功能均为开发目标；`pnpm install` 安装的是文档检查工具。
+> **私有项目，暂不开源，不接收外部贡献或 Issues。当前阶段：文档与工程规范初始化。** 本仓库尚未实现桌面 APP、SSH 连接或 Arthas 自动化，没有可下载安装包。下面的产品功能均为开发目标；`pnpm install` 安装的是文档检查工具。
 
 ## 为什么做这个工具
 
 一个微服务可能有多个实例，分布在不同服务器；不同项目还可能分别使用 SSH 直连和 JumpServer。排查问题时，需要反复登录、寻找容器、跟随日志并启动 Arthas。
 
-JVM Workbench 计划把这些操作放进桌面工作区：按项目打开窗口，按服务查看日志，按实例诊断方法，并保留每条结果的真实来源。
+TraceLogDock 计划把这些操作放进桌面工作区：按项目打开窗口，按服务查看日志，按实例诊断方法，并保留每条结果的真实来源。
 
 ## 产品目标与当前状态
 
@@ -73,12 +73,12 @@ pnpm check
 - `trace` 主要用于当前 JVM 内逐层诊断，不能自动替代分布式链路追踪，也不能恢复未采集的历史方法调用。
 - SSH 断开或关闭本地窗口不能直接证明远程诊断已停止，任务状态需要核对。
 
-## 参与开发
+## 维护方式
 
-请先阅读[贡献指南](CONTRIBUTING.md)、[行为准则](CODE_OF_CONDUCT.md)和[路线图](docs/roadmap.md)。缺陷和功能建议可使用 GitHub Issue 模板；安全问题请遵循[安全报告说明](SECURITY.md)。
+本项目目前采用私有仓库，仅由仓库所有者维护，不开放外部协作、Issues 或外部 Pull Request。开发规范见[开发指南](docs/development.md)，阶段安排见[路线图](docs/roadmap.md)，安全问题处理见[安全说明](SECURITY.md)。
 
-仓库文档和示例只能使用虚构项目、保留示例地址及无效凭据引用，不提交生产配置、终端截图、私钥或实际日志。
+仓库虽为私有，文档和示例仍使用虚构项目、保留示例地址及无效凭据引用，不提交生产配置、终端截图、私钥或实际日志。
 
-## 许可证与致谢
+## 权利说明与致谢
 
-本项目采用 [Apache License 2.0](LICENSE)。[第三方说明](THIRD_PARTY_NOTICES.md)记录已使用的开发工具与计划集成组件。Arthas、JumpServer、Docker 等名称属于各自项目；本项目为独立工具，与这些项目不存在官方隶属关系。
+本项目暂不开源，保留所有权利，使用限制见 [LICENSE](LICENSE)。[第三方说明](THIRD_PARTY_NOTICES.md)记录已使用的开发工具与计划集成组件。Arthas、JumpServer、Docker 等名称属于各自项目；本项目为独立工具，与这些项目不存在官方隶属关系。

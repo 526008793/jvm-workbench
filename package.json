@@ -1,9 +1,9 @@
 {
-  "name": "jvm-workbench",
+  "name": "tracelogdock",
   "version": "0.0.0",
   "private": true,
-  "description": "Documentation-first foundation for a multi-project Docker log and Arthas desktop workbench.",
-  "license": "Apache-2.0",
+  "description": "Private desktop workbench for multi-project Docker logs and Arthas diagnostics.",
+  "license": "UNLICENSED",
   "packageManager": "pnpm@10.28.1",
   "engines": {
     "node": ">=22"

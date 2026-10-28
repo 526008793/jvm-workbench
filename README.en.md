@@ -1,10 +1,10 @@
-# JVM Workbench
+# TraceLogDock
 
 [简体中文](README.md) · [Documentation](docs/README.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
 
 A desktop workbench for Docker logs and Arthas diagnostics across multiple Java microservice projects and servers.
 
-> **Status: documentation and repository foundation only.** No desktop application, SSH implementation, Arthas integration, or installation package is available yet. Product capabilities below are planned. Installing dependencies installs documentation tools only.
+> **Private project. External contributions and Issues are not accepted. Status: documentation and repository foundation only.** No desktop application, SSH implementation, Arthas integration, or installation package is available yet. Product capabilities below are planned. Installing dependencies installs documentation tools only.
 
 ## Planned experience
 
@@ -23,7 +23,7 @@ Electron, Vue 3, TypeScript, ssh2, and xterm.js. Connections, credentials, and t
 
 A workspace is organized as project → environment → service → instance. Connection mode belongs to each server, allowing direct SSH and JumpServer targets within the same project.
 
-## Contributing to this foundation
+## Maintaining this project
 
 Use Node.js 22 or a newer supported release, pnpm 10.28.1, and Git.
 
@@ -34,9 +34,9 @@ pnpm install --frozen-lockfile
 pnpm check
 ```
 
-Corepack may need to be installed separately depending on your Node.js distribution. There is currently no application development or packaging command. See the [development guide](docs/development.md) and [contributing guide](CONTRIBUTING.md).
+Corepack may need to be installed separately depending on your Node.js distribution. There is currently no application development or packaging command. See the [development guide](docs/development.md) for repository conventions.
 
-Most detailed documentation is currently in Simplified Chinese. English documentation improvements are welcome alongside functional contributions.
+Most detailed documentation is currently in Simplified Chinese. The repository is maintained by its owner and does not accept external contributions, Issues, or external Pull Requests.
 
 ## Integration boundaries
 
@@ -44,6 +44,6 @@ Docker log access does not imply permission to execute commands, transfer files,
 
 Never submit real credentials, production addresses, customer logs, or internal terminal screenshots. Report vulnerabilities using the [security policy](SECURITY.md).
 
-## License
+## Rights
 
-[Apache License 2.0](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md). This is an independent project and is not officially affiliated with Arthas, JumpServer, or Docker.
+All rights reserved. This project is not currently open source; see [LICENSE](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md). This is an independent project and is not officially affiliated with Arthas, JumpServer, or Docker.

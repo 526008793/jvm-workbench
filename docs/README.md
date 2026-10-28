@@ -17,4 +17,4 @@
 | [发布流程](releasing.md)            | 将来的 Mac/Windows 构建、签名与发布要求  |
 | [设计决策](adr/README.md)           | 技术和架构选择的依据                     |
 
-社区规范参见[贡献指南](../CONTRIBUTING.md)、[行为准则](../CODE_OF_CONDUCT.md)、[安全说明](../SECURITY.md)及[更新日志](../CHANGELOG.md)。
+维护规范参见[开发指南](development.md)、[安全说明](../SECURITY.md)、[权利说明](../LICENSE)及[更新日志](../CHANGELOG.md)。项目暂不开源，Issues 与外部协作关闭。
