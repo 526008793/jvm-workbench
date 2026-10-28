@@ -1,0 +1,34 @@
+name: Bug report / 缺陷报告
+description: 报告可复现的问题，请勿包含生产信息或秘密。
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        当前尚未发布应用，可报告文档和仓库工具问题。安全漏洞请先阅读 SECURITY.md，不公开细节。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与预期行为
+      description: 描述发生了什么，以及预期发生什么。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤
+      description: 使用虚构项目和脱敏数据提供最小复现。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境与版本
+      description: 提供提交/版本、系统与相关组件版本；不要提交地址、用户名、密钥或原始服务器清单。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 已脱敏的错误与验证
+      description: 可附必要错误类型和已尝试步骤，不附原始认证响应或业务参数。

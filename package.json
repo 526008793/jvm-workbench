@@ -1,0 +1,22 @@
+{
+  "name": "jvm-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Documentation-first foundation for a multi-project Docker log and Arthas desktop workbench.",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:docs": "markdownlint-cli2",
+    "check:links": "node scripts/check-doc-links.mjs",
+    "check": "pnpm format:check && pnpm lint:docs && pnpm check:links"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.24.0",
+    "prettier": "3.9.10"
+  }
+}
