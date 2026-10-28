@@ -4,9 +4,9 @@
 
 A desktop workbench for Docker logs and Arthas diagnostics across multiple Java microservice projects and servers.
 
-> **Private project. External contributions and Issues are not accepted. Status: documentation and repository foundation only.** No desktop application, SSH implementation, Arthas integration, or installation package is available yet. Product capabilities below are planned. Installing dependencies installs documentation tools only.
+> **Private project. External contributions and Issues are not accepted. Version 0.1.0 is a local desktop foundation.** Project, environment, server and service configuration, independent workspace windows, local persistence, and command previews are implemented. SSH authentication, live log streams, automatic method search, and remote diagnostics remain planned. No production-ready signed installer is available.
 
-## Planned experience
+## Product direction and current scope
 
 - Open independent project workspaces in multiple windows.
 - Connect through direct SSH or JumpServer SSH with interactive MFA and asset selection.
@@ -15,11 +15,11 @@ A desktop workbench for Docker logs and Arthas diagnostics across multiple Java 
 - Search loaded Java methods and run trace, watch, monitor, and stack templates.
 - Track and stop instance-specific tasks without disrupting other workspaces.
 
-macOS is the initial target. Windows, SLS historical queries, and structured diagnostic views are later milestones. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
+macOS is the initial target. Windows, SLS historical queries, and structured diagnostic views are later milestones. The local configuration and multi-window foundation is implemented; remote features remain pending. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
 
 ## Technical direction
 
-Electron, Vue 3, TypeScript, ssh2, and xterm.js. Connections, credentials, and task ownership live in the main process. Project windows access a narrowly scoped IPC API. See the [architecture](docs/architecture.md) and [decision records](docs/adr/README.md).
+Electron, Vue 3, TypeScript, and Zod are implemented dependencies. ssh2 and xterm.js remain planned integration choices. Connections, credentials, and task ownership live in the main process. Project windows access a narrowly scoped IPC API. See the [architecture](docs/architecture.md) and [decision records](docs/adr/README.md).
 
 A workspace is organized as project → environment → service → instance. Connection mode belongs to each server, allowing direct SSH and JumpServer targets within the same project.
 
@@ -32,9 +32,10 @@ corepack enable
 corepack prepare pnpm@10.28.1 --activate
 pnpm install --frozen-lockfile
 pnpm check
+pnpm dev
 ```
 
-Corepack may need to be installed separately depending on your Node.js distribution. There is currently no application development or packaging command. See the [development guide](docs/development.md) for repository conventions.
+Corepack may need to be installed separately depending on your Node.js distribution. Use `pnpm build` and `pnpm start` for a built application. `pnpm package:mac` produces an unsigned local test app, not a published signed release. See the [development guide](docs/development.md) for repository conventions.
 
 Most detailed documentation is currently in Simplified Chinese. The repository is maintained by its owner and does not accept external contributions, Issues, or external Pull Requests.
 

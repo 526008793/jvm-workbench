@@ -63,4 +63,4 @@ HTTP API 长任务使用 `init_session → async_exec → pull_results`，停止
 
 ## 当前状态
 
-文档已确定操作语义，具体版本与目标环境尚未完成兼容验证，集成功能待实现。
+当前已实现完整类名/方法输入及 trace、watch、异常、monitor、stack 模板预览与复制，不执行远程命令。方法候选搜索、ClassLoader 选择、包分发、attach 和任务执行尚未实现；具体版本与目标环境待兼容验证。

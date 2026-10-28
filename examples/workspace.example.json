@@ -1,44 +1,52 @@
 {
   "schemaVersion": 1,
-  "project": { "id": "project-alpha", "name": "Project Alpha" },
-  "connections": [
+  "projects": [
     {
-      "id": "direct-staging",
-      "kind": "ssh",
-      "host": "app-a.example.invalid",
-      "port": 22,
-      "username": "operator",
-      "authentication": { "kind": "privateKey", "credentialRef": "example-key-reference" }
-    },
-    {
-      "id": "jump-staging",
-      "kind": "jumpserver",
-      "host": "bastion.example.invalid",
-      "port": 2222,
-      "username": "operator",
-      "authentication": { "kind": "interactive", "credentialRef": "example-password-reference" }
-    }
-  ],
-  "environments": [
-    {
-      "id": "staging",
-      "name": "Staging",
-      "servers": [
-        { "id": "server-a", "name": "App A", "connectionId": "direct-staging" },
+      "id": "project-alpha",
+      "name": "Project Alpha",
+      "description": "Example only",
+      "revision": 0,
+      "environments": [
         {
-          "id": "server-b",
-          "name": "App B",
-          "connectionId": "jump-staging",
-          "assetSelector": { "name": "example-app-b" }
-        }
-      ],
-      "services": [
-        {
-          "id": "catalog-service",
-          "name": "Catalog Service",
-          "containers": [
-            { "serverId": "server-a", "name": "catalog-a" },
-            { "serverId": "server-b", "name": "catalog-b" }
+          "id": "staging",
+          "name": "Staging",
+          "servers": [
+            {
+              "id": "server-a",
+              "name": "App A",
+              "kind": "ssh",
+              "host": "app-a.example.invalid",
+              "port": 22,
+              "username": "operator",
+              "assetName": ""
+            },
+            {
+              "id": "server-b",
+              "name": "App B",
+              "kind": "jumpserver",
+              "host": "bastion.example.invalid",
+              "port": 2222,
+              "username": "operator",
+              "assetName": "example-app-b"
+            }
+          ],
+          "services": [
+            {
+              "id": "catalog-service",
+              "name": "Catalog Service",
+              "instances": [
+                {
+                  "id": "catalog-a",
+                  "serverId": "server-a",
+                  "containerName": "catalog-a"
+                },
+                {
+                  "id": "catalog-b",
+                  "serverId": "server-b",
+                  "containerName": "catalog-b"
+                }
+              ]
+            }
           ]
         }
       ]

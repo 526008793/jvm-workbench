@@ -1,4 +1,4 @@
-name: Documentation CI
+name: Desktop foundation CI
 
 on:
   push:
@@ -9,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs-${{ github.workflow }}-${{ github.ref }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  documentation:
-    name: Format, Markdown and relative links
+  checks:
+    name: Docs, types, behavior and build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - name: Install documentation tools
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Check repository documentation
+      - name: Check desktop foundation
         run: pnpm check
