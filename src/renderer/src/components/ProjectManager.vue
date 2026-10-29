@@ -60,7 +60,8 @@ async function remove(project: Project): Promise<void> {
   <div class="manager-shell">
     <header class="manager-top">
       <div class="brand">
-        <span class="brand-mark">⌁</span>TraceLogDock <span class="version">0.1 · 本地基础版</span>
+        <span class="brand-mark">⌁</span>TraceLogDock
+        <span class="version">0.2 · 服务器接入版</span>
       </div>
       <span class="muted">项目工作区</span>
     </header>
@@ -134,17 +135,17 @@ async function remove(project: Project): Promise<void> {
         <div>
           <span class="step">02</span>
           <h3>接入服务器</h3>
-          <p>SSH / JumpServer · 下一里程碑</p>
+          <p>SSH / JumpServer 交互终端</p>
         </div>
         <div>
           <span class="step">03</span>
           <h3>日志与诊断</h3>
-          <p>Docker / Arthas · 逐步接入</p>
+          <p>Docker 实时日志 / Arthas 模板</p>
         </div>
       </section>
     </main>
     <footer class="manager-footer">
-      <span><span class="status-dot"></span>本地配置已就绪</span
+      <span><span class="status-dot"></span>工作区已就绪</span
       ><span>私有项目 · 配置不包含登录凭据</span>
     </footer>
     <Modal v-if="showForm" :title="edited ? '编辑项目' : '新建项目'" @close="showForm = false">

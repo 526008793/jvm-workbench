@@ -2,7 +2,7 @@
 
 ## 状态
 
-已采纳为实现方向；Electron/Vue/TypeScript 运行时与本地工作区源码已加入，ssh2/xterm.js 尚未加入。
+已采纳为实现方向；Electron/Vue/TypeScript 运行时与本地工作区源码已加入，ssh2/xterm.js 已加入，实际部署兼容仍待验证。
 
 ## 背景
 

@@ -4,7 +4,7 @@
 
 A desktop workbench for Docker logs and Arthas diagnostics across multiple Java microservice projects and servers.
 
-> **Private project. External contributions and Issues are not accepted. Version 0.1.0 is a local desktop foundation.** Project, environment, server and service configuration, independent workspace windows, local persistence, and command previews are implemented. SSH authentication, live log streams, automatic method search, and remote diagnostics remain planned. No production-ready signed installer is available.
+> **Private project. External contributions and Issues are not accepted. Version 0.2.0 adds server connections and Docker logs.** Password/private-key SSH, host trust, interactive MFA, an embedded terminal, manual JumpServer target selection/confirmation, container discovery, and live multi-instance logs are implemented. Remote flows have been tested against isolated local SSH fixtures, not a production JumpServer deployment or Docker engine. Automatic Arthas attachment and method discovery remain pending. No production signed installer is available.
 
 ## Product direction and current scope
 
@@ -15,11 +15,11 @@ A desktop workbench for Docker logs and Arthas diagnostics across multiple Java 
 - Search loaded Java methods and run trace, watch, monitor, and stack templates.
 - Track and stop instance-specific tasks without disrupting other workspaces.
 
-macOS is the initial target. Windows, SLS historical queries, and structured diagnostic views are later milestones. The local configuration and multi-window foundation is implemented; remote features remain pending. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
+macOS is the initial target. Windows, SLS historical queries, and structured diagnostic views are later milestones. Workspaces, SSH/MFA terminals, container discovery and live Docker log workflows are implemented; automatic Arthas diagnostics remain pending. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
 
 ## Technical direction
 
-Electron, Vue 3, TypeScript, and Zod are implemented dependencies. ssh2 and xterm.js remain planned integration choices. Connections, credentials, and task ownership live in the main process. Project windows access a narrowly scoped IPC API. See the [architecture](docs/architecture.md) and [decision records](docs/adr/README.md).
+Electron, Vue 3, TypeScript, Zod, ssh2, and xterm.js are runtime/build dependencies. Connections, credentials, and task ownership live in the main process. Project windows access a narrowly scoped IPC API. See the [architecture](docs/architecture.md) and [decision records](docs/adr/README.md).
 
 A workspace is organized as project → environment → service → instance. Connection mode belongs to each server, allowing direct SSH and JumpServer targets within the same project.
 

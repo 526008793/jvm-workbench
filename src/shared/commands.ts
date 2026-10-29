@@ -1,3 +1,5 @@
+import type { Server } from './models';
+
 export type LogMode = 'new' | 'recent' | 'since';
 export type DiagnosticKind = 'trace' | 'watch' | 'exception' | 'monitor' | 'stack';
 
@@ -49,4 +51,9 @@ export function buildDiagnosticCommand(
     case 'stack':
       return `stack ${target} -n ${count}`;
   }
+}
+
+// Credential submission and live sessions bind to connection-relevant fields, not a mutable display name.
+export function connectionBinding(server: Server): string {
+  return JSON.stringify([server.kind, server.host, server.port, server.username, server.assetName]);
 }

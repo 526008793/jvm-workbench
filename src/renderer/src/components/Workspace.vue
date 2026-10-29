@@ -7,14 +7,10 @@ import type {
   Service,
   ServiceInstance,
 } from '../../../shared/models';
-import {
-  buildDiagnosticCommand,
-  buildLogCommand,
-  type DiagnosticKind,
-  type LogMode,
-} from '../../../shared/commands';
+import { buildDiagnosticCommand, type DiagnosticKind } from '../../../shared/commands';
 import { unwrap, errorMessage } from '../api';
 import Modal from './Modal.vue';
+import RemoteWorkspace from './RemoteWorkspace.vue';
 
 const props = defineProps<{ project: Project }>();
 const emit = defineEmits<{ error: [message: string]; notice: [message: string] }>();
@@ -35,9 +31,8 @@ const fields = reactive({
   assetName: '',
 });
 const instanceFields = ref<ServiceInstance[]>([]);
-const logMode = ref<LogMode>('new');
-const logLines = ref(100);
-const logSince = ref('10m');
+const remoteStates = ref<Record<string, string>>({});
+const remoteTaskCount = ref(0);
 const diagnostic = reactive({
   kind: 'trace' as DiagnosticKind,
   className: '',
@@ -196,20 +191,32 @@ function addInstance(): void {
 async function copy(text: string): Promise<void> {
   try {
     await unwrap(window.tracelogdock.copyCommand(text));
-    emit('notice', '命令已复制，当前版本不会自动执行');
+    emit('notice', 'Arthas命令已复制，自动诊断尚未接入');
   } catch (error) {
     emit('error', errorMessage(error));
   }
 }
-function logCommand(container: string): string {
-  try {
-    return buildLogCommand(container, logMode.value, logLines.value, logSince.value);
-  } catch {
-    return '';
-  }
-}
 function serverName(id: string): string {
   return environment.value.servers.find((s) => s.id === id)?.name ?? '服务器已移除';
+}
+async function useContainer(serverId: string, name: string): Promise<void> {
+  if (!selectedService.value) return;
+  const next: Project = JSON.parse(JSON.stringify(props.project));
+  const service = next.environments
+    .find((e) => e.id === environment.value.id)
+    ?.services.find((s) => s.id === selectedService.value!.id);
+  if (
+    !service ||
+    service.instances.some((i) => i.serverId === serverId && i.containerName === name)
+  )
+    return;
+  service.instances.push({ id: crypto.randomUUID(), serverId, containerName: name });
+  try {
+    await unwrap(window.tracelogdock.saveProject(next));
+    emit('notice', '容器已关联到当前服务');
+  } catch (error) {
+    emit('error', errorMessage(error));
+  }
 }
 async function manager(): Promise<void> {
   try {
@@ -286,7 +293,7 @@ async function manager(): Promise<void> {
         </p>
       </div>
       <div class="sidebar-bottom">
-        <span class="status-dot"></span>本地配置模式<span class="version">v0.1.0</span>
+        <span class="status-dot"></span>服务器工作区<span class="version">v0.2.0</span>
       </div>
     </aside>
     <main class="workspace-main">
@@ -349,10 +356,30 @@ async function manager(): Promise<void> {
             ><small>分布在 {{ environment.services.length }} 个服务</small>
           </div>
           <div class="summary-card">
-            <span>连接状态</span><strong class="muted">尚未连接</strong
-            ><small>远程连接将在下一里程碑接入</small>
+            <span>连接状态</span
+            ><strong
+              >{{
+                Object.values(remoteStates).filter((s) => s === '已连接').length
+              }}
+              台已连接</strong
+            ><small>JumpServer选机后需确认目标主机</small>
           </div>
         </div>
+        <RemoteWorkspace
+          :project="project"
+          :environment="environment"
+          :service="selectedService"
+          :view="page"
+          @error="emit('error', $event)"
+          @notice="emit('notice', $event)"
+          @status="
+            (states, count) => {
+              remoteStates = states;
+              remoteTaskCount = count;
+            }
+          "
+          @use-container="useContainer"
+        />
         <section v-if="page === 'servers'" class="panel">
           <div class="panel-heading">
             <h2>连接清单</h2>
@@ -389,7 +416,9 @@ async function manager(): Promise<void> {
                 <td>
                   {{ server.username }}<small v-if="server.assetName">{{ server.assetName }}</small>
                 </td>
-                <td><span class="muted">未连接</span></td>
+                <td>
+                  <span class="muted">{{ remoteStates[server.id] || '未连接' }}</span>
+                </td>
                 <td class="table-actions">
                   <button
                     class="text-button"
@@ -431,55 +460,11 @@ async function manager(): Promise<void> {
                 <span class="service-dot"></span
                 ><strong class="mono">{{ instance.containerName }}</strong
                 ><span class="muted">{{ serverName(instance.serverId) }}</span
-                ><span class="pill">未连接</span>
+                ><span class="pill">{{ remoteStates[instance.serverId] || '未连接' }}</span>
               </div>
             </div>
           </section>
-          <section v-if="page === 'logs'" class="panel log-panel">
-            <div class="panel-heading">
-              <div class="tab-label">
-                <span class="status-dot muted-dot"></span>
-                <h2>实时日志</h2>
-              </div>
-              <span class="muted">{{
-                selectedService ? '所选服务的全部配置实例' : '请选择或添加服务'
-              }}</span>
-            </div>
-            <div class="log-toolbar">
-              <label
-                >日志范围<select v-model="logMode">
-                  <option value="new">只看新日志</option>
-                  <option value="recent">最近 N 行</option>
-                  <option value="since">指定时间</option>
-                </select></label
-              ><label v-if="logMode === 'recent'"
-                >行数<input v-model.number="logLines" type="number" min="0" /></label
-              ><label v-if="logMode === 'since'"
-                >开始时间<input v-model="logSince" placeholder="10m 或 ISO 时间" /></label
-              ><span class="pill">--timestamps</span>
-            </div>
-            <div class="terminal-empty">
-              <span class="terminal-cursor">▍</span>
-              <h2>日志通道尚未连接</h2>
-              <p>
-                当前可配置服务和实例、生成 Docker 日志命令。<br />SSH
-                接入后将在这里持续展示带节点来源的真实日志。
-              </p>
-            </div>
-            <div v-if="selectedService?.instances.length" class="command-list">
-              <div v-for="instance in selectedService.instances" :key="instance.id">
-                <span class="muted">{{ serverName(instance.serverId) }}</span
-                ><code>{{ logCommand(instance.containerName) || '请检查日志范围参数' }}</code
-                ><button
-                  :disabled="!logCommand(instance.containerName)"
-                  @click="copy(logCommand(instance.containerName))"
-                >
-                  复制命令
-                </button>
-              </div>
-            </div>
-          </section>
-          <section v-else class="panel diagnostic-panel">
+          <section v-if="page === 'diagnostics'" class="panel diagnostic-panel">
             <div class="panel-heading">
               <h2>Arthas 快捷命令</h2>
               <span class="pill">命令预览 · 尚未连接 JVM</span>
@@ -531,7 +516,12 @@ async function manager(): Promise<void> {
         </template>
       </div>
       <footer class="taskbar">
-        <span><span class="status-dot muted-dot"></span>暂无远程任务</span
+        <span
+          ><span class="status-dot muted-dot"></span
+          >{{ remoteTaskCount ? `运行日志任务 ${remoteTaskCount} 个` : '暂无运行中的日志任务' }}
+          <button v-if="remoteTaskCount" class="text-button" @click="page = 'logs'">
+            查看日志
+          </button></span
         ><span>配置版本 {{ project.revision }} · {{ project.name }} / {{ environment.name }}</span>
       </footer>
     </main>
@@ -571,7 +561,7 @@ async function manager(): Promise<void> {
             >目标资产名称<input v-model="fields.assetName" placeholder="例如：生产应用节点 A"
           /></label>
           <p class="form-help">
-            此处仅保存连接配置；密码、私钥和 MFA 将在远程接入阶段提供。
+            此处只保存连接信息；在连接面板输入本次密码或选择私钥，MFA按服务器提示提交。
           </p></template
         >
         <template v-if="modal === 'service'"

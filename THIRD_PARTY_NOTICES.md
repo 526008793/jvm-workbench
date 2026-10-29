@@ -24,4 +24,4 @@
 
 JumpServer 与 Docker 是目标环境中的外部系统，本仓库当前不分发它们。未来若配套分发 Arthas 包，应固定版本并保留其 LICENSE、NOTICE（若存在）及所需依赖声明；实现时更新此文档。
 
-当前还使用 Zod（模型校验，MIT）、electron-vite/Vite（构建，MIT）、electron-builder（本地打包，MIT）、tsx（测试执行，MIT）及 playwright-core（桌面验证，Apache-2.0）。ssh2、xterm.js、Arthas 仍未集成。最终分发物的完整依赖许可须在正式发布前核对。
+当前还使用 Zod（模型校验，MIT）、electron-vite/Vite（构建，MIT）、electron-builder（本地打包，MIT）、tsx（测试执行，MIT）及 playwright-core（桌面验证，Apache-2.0）。ssh2 与 xterm.js（含 addon-fit，MIT）已集成，Arthas 仍未集成。最终分发物的完整依赖许可须在正式发布前核对。

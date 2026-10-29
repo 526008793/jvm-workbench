@@ -948,3 +948,158 @@ code,
     padding: 12px 10px;
   }
 }
+
+.connection-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 15px 18px;
+}
+.connection-chip {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: #101720;
+  border-radius: 7px;
+  padding: 6px 8px;
+}
+.connection-chip.chosen {
+  border-color: #59d3b775;
+}
+.connection-chip .text-button {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.connection-chip > button:last-child {
+  font-size: 11px;
+  padding: 4px 9px;
+}
+.remote-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+.remote-actions > span {
+  margin-right: auto;
+}
+.remote-actions button {
+  padding: 6px 9px;
+  font-size: 11px;
+}
+.remote-error {
+  color: #f4a8ad;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  padding: 4px 10px;
+}
+.terminal-hint {
+  color: #9caec0;
+  font-size: 10px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--line);
+  background: #0c131c;
+}
+.ssh-terminal {
+  height: 310px;
+  padding: 10px;
+  background: #0b1119;
+}
+.ssh-terminal .xterm {
+  height: 100%;
+}
+.host-fingerprint {
+  display: block;
+  padding: 15px;
+  border: 1px solid var(--line);
+  background: #0b1119;
+  color: var(--accent);
+  border-radius: 6px;
+  margin-top: 15px;
+  overflow-wrap: anywhere;
+}
+.remote-workspace .modal form > label {
+  margin-top: 15px;
+}
+.instance-checkboxes {
+  display: flex;
+  gap: 15px;
+  flex-wrap: wrap;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.instance-checkboxes label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+}
+.instance-checkboxes input {
+  width: auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.log-filter {
+  width: calc(100% - 36px);
+  margin: 12px 18px;
+  padding: 7px 10px;
+  font-size: 11px;
+}
+.live-log-view {
+  max-height: 430px;
+  min-height: 260px;
+  overflow: auto;
+  background: #0b1119;
+  padding: 8px 0;
+}
+.live-log-row {
+  display: flex;
+  align-items: flex-start;
+  border-bottom: 1px solid #172130;
+  padding: 5px 13px;
+  gap: 12px;
+}
+.live-log-row code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  flex: 1;
+  color: #c7d7e5;
+}
+.log-source {
+  color: #72b9aa;
+  font:
+    10px/1.5 'SFMono-Regular',
+    monospace;
+  flex: 0 0 145px;
+  overflow-wrap: anywhere;
+}
+.log-source small {
+  display: block;
+  color: #697e94;
+  font-size: 9px;
+}
+.log-task-list {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 18px;
+}
+.log-task-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 11px;
+}
+.remote-workspace .log-toolbar {
+  flex-wrap: wrap;
+}
+.remote-workspace .log-toolbar button {
+  font-size: 11px;
+  padding: 6px 9px;
+}

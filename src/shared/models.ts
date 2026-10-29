@@ -1,4 +1,14 @@
 import { z } from 'zod';
+import type {
+  ChallengeAnswer,
+  ConnectInput,
+  ConnectionView,
+  DockerContainer,
+  LogRequest,
+  LogTask,
+  RemoteEvent,
+  RemoteTarget,
+} from './remote';
 
 const id = z.string().min(1);
 const name = z.string().trim().min(1, '名称不能为空');
@@ -47,6 +57,20 @@ export type WindowContext = { kind: 'manager' } | { kind: 'workspace'; projectId
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export interface DesktopApi {
+  listConnections(): Promise<ApiResult<ConnectionView[]>>;
+  connect(input: ConnectInput): Promise<ApiResult<ConnectionView>>;
+  disconnect(connectionId: string): Promise<ApiResult<void>>;
+  answerChallenge(input: ChallengeAnswer): Promise<ApiResult<void>>;
+  choosePrivateKey(): Promise<ApiResult<{ id: string; name: string } | null>>;
+  terminalSnapshot(connectionId: string): Promise<ApiResult<{ seq: number; data: string }>>;
+  terminalInput(connectionId: string, data: string): Promise<ApiResult<void>>;
+  terminalResize(connectionId: string, cols: number, rows: number): Promise<ApiResult<void>>;
+  confirmTarget(connectionId: string): Promise<ApiResult<ConnectionView>>;
+  discoverContainers(target: RemoteTarget): Promise<ApiResult<DockerContainer[]>>;
+  startLogs(input: LogRequest): Promise<ApiResult<LogTask[]>>;
+  stopLogs(ids: string[]): Promise<ApiResult<void>>;
+  listLogTasks(): Promise<ApiResult<LogTask[]>>;
+  onRemoteEvent(callback: (event: RemoteEvent) => void): () => void;
   context(): Promise<ApiResult<WindowContext>>;
   listProjects(): Promise<ApiResult<Project[]>>;
   createProject(input: CreateProject): Promise<ApiResult<Project>>;

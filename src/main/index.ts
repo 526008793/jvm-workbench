@@ -3,6 +3,8 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { channels } from '../shared/channels';
 import { type ApiResult, type WindowContext, projectSchema } from '../shared/models';
+import { remoteChannels } from '../shared/channels';
+import { RemoteController } from './connections/remote-controller';
 import { ProjectStore } from './storage/project-store';
 import { ContextRegistry } from './workspaces/context-registry';
 
@@ -13,6 +15,7 @@ const registry = new ContextRegistry();
 const workspaces = new Map<string, BrowserWindow>();
 let manager: BrowserWindow | undefined;
 let store: ProjectStore;
+let remote: RemoteController;
 
 function broadcast(): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channels.changed);
@@ -37,7 +40,14 @@ function createWindow(context: WindowContext, title: string): BrowserWindow {
   });
   const senderId = window.webContents.id;
   registry.register(senderId, context);
-  window.on('closed', () => registry.remove(senderId));
+  window.on('closed', () => {
+    remote.disposeOwner(senderId);
+    registry.remove(senderId);
+  });
+  window.webContents.on('render-process-gone', () => remote.disposeOwner(senderId));
+  window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
+    if (isMainFrame) remote.disposeOwner(senderId);
+  });
   window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -100,6 +110,7 @@ function registerHandlers(): void {
       }
     });
   };
+  remote.register(handle);
   handle(channels.context, (sender) => registry.get(sender));
   handle(channels.list, async (sender) => {
     const context = registry.get(sender);
@@ -119,6 +130,7 @@ function registerHandlers(): void {
     const project = projectSchema.parse(input);
     registry.assertProject(sender, project.id);
     const saved = await store.save(project);
+    remote.reconcile(saved);
     workspaces.get(project.id)?.setTitle(`${saved.name} · TraceLogDock`);
     console.info('[projects] saved', { projectId: saved.id, revision: saved.revision });
     broadcast();
@@ -160,6 +172,28 @@ else {
     .whenReady()
     .then(() => {
       store = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
+      remote = new RemoteController(
+        store,
+        registry,
+        join(app.getPath('userData'), 'known-hosts.json'),
+        (owner, event) => {
+          const contents = BrowserWindow.getAllWindows().find(
+            (window) => window.webContents.id === owner,
+          )?.webContents;
+          if (contents && !contents.isDestroyed()) contents.send(remoteChannels.event, event);
+        },
+        async (owner) => {
+          const window = BrowserWindow.getAllWindows().find(
+            (window) => window.webContents.id === owner,
+          );
+          if (!window) throw new Error('工作区已关闭');
+          const result = await dialog.showOpenDialog(window, {
+            title: '选择SSH私钥',
+            properties: ['openFile'],
+          });
+          return result.canceled ? undefined : result.filePaths[0];
+        },
+      );
       registerHandlers();
       Menu.setApplicationMenu(
         Menu.buildFromTemplate([
@@ -206,6 +240,9 @@ else {
       app.quit();
     });
 }
+app.on('before-quit', () => {
+  for (const window of BrowserWindow.getAllWindows()) remote?.disposeOwner(window.webContents.id);
+});
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
