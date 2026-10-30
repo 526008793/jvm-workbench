@@ -1,13 +1,20 @@
 # Mac 与 Windows 安装使用
 
-当前功能版本为 **0.3.20**。仓库保存源码与文档，安装包、用户配置和运行日志不提交到 Git；目前没有 GitHub Release 下载页。
+当前版本为 **0.3.20预览版**。使用APP不需要下载源码，也不需要Node.js、pnpm或本地Java。
 
-| 平台              | 构建产物                            | 当前验证情况                                         |
-| ----------------- | ----------------------------------- | ---------------------------------------------------- |
-| Mac Apple Silicon | `TraceLogDock.app`                  | 本机 ad-hoc 签名、启动及核心界面回归通过             |
-| Windows 10/11 x64 | `TraceLogDock-Setup-0.3.20-x64.exe` | 已配置 NSIS 构建入口，Windows 实机安装与运行尚未验收 |
+## 直接下载
 
-已经拿到对应平台的可信安装文件时，可以直接安装，不需要 Node.js、pnpm 或本地 Java。没有安装文件时，由维护者按下方步骤构建；远端 Arthas 需要的 Java 位于目标服务器容器内。
+在[GitHub Release](https://github.com/526008793/tracelogdock/releases/tag/v0.3.20)选择对应附件，也可直接点击：
+
+| 系统                       | 下载                                                                                                                                       | 安装方式                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------- |
+| Mac Apple Silicon（M系列） | [TraceLogDock-0.3.20-mac-arm64.dmg](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-0.3.20-mac-arm64.dmg) | 打开DMG，把APP拖到“应用程序” |
+| Windows x64                | [TraceLogDock-Setup-0.3.20-x64.exe](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-Setup-0.3.20-x64.exe) | 双击并按安装向导操作         |
+| SHA-256校验值              | [SHA256SUMS.txt](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/SHA256SUMS.txt)                                       | 核对下载文件完整性           |
+
+仓库保持私有，下载需要登录有该仓库访问权限的GitHub账号。Mac包不适用于Intel芯片；Windows包为x64。发布流程在原生Mac/Windows runner上完成构建、安装包核对和隔离APP回归后才上传附件；真实业务服务器及所有客户端系统版本仍需按实际环境核对。
+
+安装包存放在Release附件，源码仓库不提交构建目录、用户配置和运行日志。只有维护者自行构建时才需要下面的开发环境；普通使用者可直接跳到安装步骤或首次配置。
 
 ## 获取源码与构建环境
 
@@ -20,7 +27,7 @@ cd tracelogdock
 
 已有工作副本时，先保存本地修改，再同步仓库代码。pnpm 准备方法见[开发指南](development.md)。下面的打包命令只构建本地产物，不创建 GitHub Release。
 
-## Mac：构建与安装
+## Mac：安装与自行构建
 
 当前已验证 Apple Silicon；Intel Mac 和其他系统版本需要分别构建、验收，不能直接使用 arm64 包。
 
@@ -31,10 +38,10 @@ pnpm install --frozen-lockfile
 pnpm package:mac
 ```
 
-Apple Silicon 产物为 `dist/mac-arm64/TraceLogDock.app`。这是 APP 目录包，不是 DMG 安装镜像。
+`pnpm package:mac`产物为`dist/mac-arm64/TraceLogDock.app`；维护者需要DMG时运行`pnpm package:mac:installer`，输出`dist/release/TraceLogDock-0.3.20-mac-arm64.dmg`。直接下载的DMG无需执行构建命令。
 
 1. 如果正在使用旧版，先用 `⌘Q` 完全退出。
-2. 在 Finder 打开 `dist/mac-arm64`，把 `TraceLogDock.app` 拖到“应用程序”。
+2. 下载用户双击DMG；自行构建用户在Finder打开`dist/mac-arm64`。把其中的`TraceLogDock.app`拖到“应用程序”。
 3. 从“应用程序”打开 TraceLogDock，也可添加到 Dock。
 4. 如系统提示来源或首次打开确认，先核对安装文件来源，再通过系统提供的允许打开入口处理。
 
@@ -42,7 +49,7 @@ Apple Silicon 产物为 `dist/mac-arm64/TraceLogDock.app`。这是 APP 目录包
 
 首次连接内网时，允许 APP 的本地网络访问；如连接被系统阻止，到“系统设置 → 隐私与安全性 → 本地网络”检查 TraceLogDock。升级后访问已保存密码时，系统可能再次显示 TraceLogDock Safe Storage 钥匙串授权窗口，应在系统窗口处理。
 
-## Windows：构建与安装
+## Windows：安装与自行构建
 
 在 Windows 10/11 x64 的项目根目录打开 PowerShell，执行：
 
@@ -58,7 +65,7 @@ pnpm package:win
 3. 完成后通过桌面或开始菜单的 TraceLogDock 快捷方式启动。
 4. 如需卸载，在 Windows 设置的“应用”中找到 TraceLogDock 并卸载。
 
-当前未配置 Windows 发布者代码签名证书，系统可能显示未知发布者；应核对文件来源。Windows 安装、升级、卸载和实际连接功能仍需在 Windows 上验证，不能用 Mac 测试结果代替。
+当前未配置 Windows 发布者代码签名证书，系统可能显示未知发布者；应核对文件来源。发布流程会在原生Windows runner安装NSIS、运行隔离APP回归并卸载；这不等于Windows 10/11所有系统版本和真实服务器环境均已验收。
 
 Windows 安装包应在 Windows 环境构建。当前不提供已验证的 Apple Silicon 交叉构建流程，也不要求在 Mac 上准备 Wine、Rosetta 或 Windows 虚拟机。
 

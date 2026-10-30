@@ -2,9 +2,21 @@
 
 ## 当前状态
 
-当前功能版本为0.3.20，提供本机Mac测试包与Windows x64 NSIS安装包构建入口；没有GitHub Release、正式代码签名或Apple公证发布流程。版本号及成功打包不代表目标平台的安装/运行已验收。
+0.3.20通过GitHub Release提供Mac arm64 DMG和Windows x64 NSIS安装向导。两平台分别在GitHub原生runner构建和检查，全部通过后才发布预览版附件。仓库保持私有，下载需要有仓库权限；没有自动更新服务或Apple公证/Windows发布者签名。
 
-安装、升级及首次配置步骤见[Mac与Windows安装使用](installation.md)。
+普通用户直接阅读[下载与安装](installation.md)，无需克隆源码或安装构建环境。
+
+## 云端构建与发布
+
+1. 更新`package.json`版本、`CHANGELOG.md`及`docs/releases/v<版本>.md`迭代说明，并同步README和安装指南的下载版本。
+2. 检查并推送代码。在GitHub Actions选择 **Build installers and publish → Run workflow**，选择目标分支。
+3. Mac任务使用`macos-15` arm64 runner，运行完整检查、生成DMG、挂载复制APP、核对签名/架构/版本并运行隔离界面回归。
+4. Windows任务使用`windows-2025` x64 runner，运行完整检查、生成NSIS、实际安装、核对架构/版本、运行隔离界面回归并卸载。
+5. 两个平台都成功后，发布任务收集两个安装包，生成`SHA256SUMS.txt`，将安装包作为Release附件上传。上传完成前保持草稿，随后发布同版本tag的预览版。
+
+源码目录不保存安装包。Actions中间附件保留7天，已发布Release附件不受此临时保留时间影响。工作流仅手动触发，不会因每次推送main而自动发布；同一版本不自动覆盖已有Release，迭代时应更新版本号。
+
+当前版本下载入口为[Release v0.3.20](https://github.com/526008793/tracelogdock/releases/tag/v0.3.20)。发布流程见`.github/workflows/release.yml`，本地Windows交叉打包不属于该流程。
 
 ## 应用发布前
 
@@ -37,8 +49,8 @@ pnpm package:win
 
 Windows安装包按本指南在Windows环境构建；当前不提供已验证的Mac交叉构建流程。Windows实机还需验证安装/卸载、启动、配置保存、记住密码、SSH/MFA/终端、日志与诊断。未配置Windows代码签名证书时，安装程序没有已验证发布者，不能把它描述为已签名正式发布。
 
-## GitHub Release
+## 验证与签名范围
 
-只有真实构建和验收通过后创建版本 tag 和 Release，附准确的产物清单、SHA-256 校验和、版本变化及限制。不自动将任意 main 提交发布给用户，首期也不实现自动更新服务。
+平台安装验证脚本分别为`scripts/verify-mac-installer.sh`和`scripts/verify-windows-installer.ps1`。APP回归只使用临时项目、本机SSH/模型fixture；不连接真实服务器，不读取用户已有凭据。Windows行为测试会跳过仅针对POSIX shell的用例。
 
-当前 CI 验证文档、类型、行为测试和应用构建；签名发布流水线随正式发布条件加入。
+GitHub原生构建验证不代替客户环境的JumpServer策略、Docker镜像、Arthas权限或全部桌面系统版本验收。Mac ad-hoc签名和Windows无发布者签名须在Release说明中保留，不能描述为已公证/签名的正式发行版。

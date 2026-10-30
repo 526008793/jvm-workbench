@@ -15,7 +15,7 @@ A desktop workbench for Docker logs and Arthas diagnostics across multiple Java 
 - Search loaded Java methods and run trace, watch, monitor, and stack templates.
 - Track and stop instance-specific tasks without disrupting other workspaces.
 
-macOS is the validated desktop target. Windows x64 has an NSIS build entry, with native installation/runtime acceptance pending; SLS historical queries remain a later milestone. Workspaces, SSH/MFA terminals, container discovery and live Docker log workflows are implemented; Arthas package detection/download workflows are implemented, with real deployment validation pending. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
+macOS is the validated desktop target. Windows x64 has an NSIS build and installation verification workflow; SLS historical queries remain a later milestone. Workspaces, SSH/MFA terminals, container discovery and live Docker log workflows are implemented; Arthas package detection/download workflows are implemented, with real deployment validation pending. Current status and acceptance criteria are maintained in the [roadmap](docs/roadmap.md).
 
 ## Technical direction
 
@@ -23,16 +23,14 @@ Electron, Vue 3, TypeScript, Zod, ssh2, and xterm.js are runtime/build dependenc
 
 A workspace is organized as project → environment → service → instance. Connection mode belongs to each server, allowing direct SSH and JumpServer targets within the same project.
 
-## Install and use
+## Download and install
 
-See the [Mac and Windows installation guide](docs/installation.md) for setup, installation, upgrades, server configuration, logs, diagnostics and AI settings.
+No source checkout, Node.js or pnpm is needed to run the application. Open the [v0.3.20 release](https://github.com/526008793/tracelogdock/releases/tag/v0.3.20), or download directly:
 
-| Platform          | Build command                 | Output                                           |
-| ----------------- | ----------------------------- | ------------------------------------------------ |
-| Apple Silicon Mac | `pnpm package:mac`            | `dist/mac-arm64/TraceLogDock.app`                |
-| Windows 10/11 x64 | `pnpm package:win` on Windows | `dist/windows/TraceLogDock-Setup-0.3.20-x64.exe` |
+- [Apple Silicon Mac DMG](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-0.3.20-mac-arm64.dmg): open and drag the APP to Applications.
+- [Windows x64 installer](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-Setup-0.3.20-x64.exe): run the setup wizard.
 
-Install dependencies with `pnpm install --frozen-lockfile` before building. End users do not need Node.js or pnpm. Installers are not committed to Git, and there is no GitHub Release download yet. Mac builds are ad-hoc signed test apps; native Windows installation/runtime acceptance is pending.
+This repository is private; sign in with an authorized GitHub account to download. These are preview builds, produced and checked on native GitHub runners before publication. Mac builds are not notarized and Windows publisher signing is not configured. See the [installation guide](docs/installation.md) for upgrades, server setup and use.
 
 ## Maintaining this project
 
@@ -46,7 +44,7 @@ pnpm check
 pnpm dev
 ```
 
-Corepack may need to be installed separately depending on your Node.js distribution. Use `pnpm build` and `pnpm start` for a built application. `pnpm package:win` generates a Windows x64 NSIS installer under `dist/windows`; Windows installation/runtime acceptance is still pending. `pnpm package:mac` produces an ad-hoc signed local test app, not a notarized release. See the [development guide](docs/development.md) for repository conventions.
+Corepack may need to be installed separately depending on your Node.js distribution. Use `pnpm build` and `pnpm start` for a built application. `pnpm package:win` generates a Windows x64 NSIS installer under `dist/windows`; Native installation and isolated APP flows are checked by the release workflow. `pnpm package:mac` produces an ad-hoc signed local test app, not a notarized release. See the [development guide](docs/development.md) for repository conventions.
 
 Most detailed documentation is currently in Simplified Chinese. The repository is maintained by its owner and does not accept external contributions, Issues, or external Pull Requests.
 

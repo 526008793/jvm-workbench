@@ -21,6 +21,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:desktop": "pnpm build && node scripts/smoke-desktop.mjs",
     "package:mac": "pnpm build && electron-builder --mac --dir",
+    "package:mac:installer": "pnpm build && electron-builder --mac dmg --arm64 --publish never --config.directories.output=dist/release",
     "package:win": "pnpm build && electron-builder --win nsis --x64 --publish never --config.directories.output=dist/windows",
     "test:remote": "pnpm build && node scripts/smoke-remote.mjs",
     "test:arthas": "pnpm build && node scripts/smoke-arthas.mjs",
@@ -89,6 +90,7 @@
       "createStartMenuShortcut": true
     },
     "mac": {
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "category": "public.app-category.developer-tools",
       "target": [
         "dir"

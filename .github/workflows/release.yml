@@ -1,0 +1,128 @@
+name: Build installers and publish
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify ${{ matrix.platform }} installer
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            os: macos-15
+          - platform: windows
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check docs, types, behavior and build
+        run: pnpm check
+      - name: Build Mac DMG
+        if: runner.os == 'macOS'
+        run: pnpm package:mac:installer
+      - name: Verify Mac installation and APP
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          installer=(dist/release/*.dmg)
+          bash scripts/verify-mac-installer.sh "${installer[0]}"
+      - name: Build Windows setup
+        if: runner.os == 'Windows'
+        run: pnpm package:win
+      - name: Verify Windows installation, APP and uninstall
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist/windows/*-Setup-*-x64.exe | Select-Object -First 1
+          & ./scripts/verify-windows-installer.ps1 -Installer $installer.FullName
+      - name: Save verified installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-${{ matrix.platform }}
+          path: |
+            dist/release/*.dmg
+            dist/windows/*-Setup-*-x64.exe
+          if-no-files-found: error
+          retention-days: 7
+      - name: Save failed UI evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: failed-ui-${{ matrix.platform }}
+          path: output/playwright
+          if-no-files-found: ignore
+          retention-days: 7
+
+  publish:
+    name: Publish verified preview downloads
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Download verified installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          merge-multiple: true
+          path: assets
+      - name: Check installer set and write SHA-256 checksums
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          export RELEASE_VERSION="$version"
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          version = os.environ['RELEASE_VERSION']
+          names = [f'TraceLogDock-{version}-mac-arm64.dmg', f'TraceLogDock-Setup-{version}-x64.exe']
+          assets = Path('assets')
+          if sorted(p.name for p in assets.iterdir()) != sorted(names):
+              raise SystemExit('Verified installer set does not match the release version')
+          with (assets / 'SHA256SUMS.txt').open('w') as output:
+              for name in names:
+                  digest = hashlib.file_digest((assets / name).open('rb'), 'sha256').hexdigest()
+                  output.write(f'{digest}  {name}\n')
+          PY
+      - name: Publish preview only after both installers pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          tag="v$version"
+          gh release create "$tag" assets/*.dmg assets/*.exe assets/SHA256SUMS.txt \
+            --title "TraceLogDock $tag · 预览版" --notes-file "docs/releases/$tag.md" \
+            --target "$GITHUB_SHA" --prerelease --draft
+          gh release edit "$tag" --draft=false

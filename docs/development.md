@@ -6,7 +6,7 @@
 
 ## 环境与启动
 
-要求 Node.js 22.12 或更新的受支持版本、pnpm 10.28.1 和 Git。非Windows行为测试另需Python 3，用于隔离的真实PTY回归，桌面APP运行不依赖Python。桌面冒烟当前在macOS验证；已有Windows x64安装包构建入口，Windows实机安装/运行尚未验收，详见[发布流程](releasing.md)。
+要求 Node.js 22.12 或更新的受支持版本、pnpm 10.28.1 和 Git。非Windows行为测试另需Python 3，用于隔离的真实PTY回归，桌面APP运行不依赖Python。桌面冒烟当前在macOS验证；已有Windows x64安装包构建入口，GitHub原生runner的安装/APP验证由发布流程执行，详见[发布流程](releasing.md)。
 
 ```bash
 corepack enable
@@ -19,19 +19,20 @@ pnpm dev
 
 ## 命令
 
-| 命令                | 作用                                                    |
-| ------------------- | ------------------------------------------------------- |
-| `pnpm dev`          | 启动 Electron/Vue 开发模式                              |
-| `pnpm build`        | 构建主进程、preload 和渲染层到 out                      |
-| `pnpm start`        | 启动构建后的 APP                                        |
-| `pnpm typecheck`    | TypeScript 与 Vue 类型检查                              |
-| `pnpm test`         | 配置、隔离、命令及本地 SSH/Docker 协议行为测试          |
-| `pnpm test:remote`  | 实际 Electron 连接本地 SSH/MFA 服务，验证终端和双源日志 |
-| `pnpm test:desktop` | 构建后验证真实 Electron 窗口与持久化                    |
-| `pnpm package:mac`  | 生成本机 ad-hoc 签名 Mac 测试 APP                       |
-| `pnpm package:win`  | 生成Windows x64 NSIS安装向导到dist/windows，不自动发布  |
-| `pnpm format`       | 格式化代码和文档                                        |
-| `pnpm check`        | 格式、Markdown、链接、类型、行为测试与构建              |
+| 命令                         | 作用                                                    |
+| ---------------------------- | ------------------------------------------------------- |
+| `pnpm dev`                   | 启动 Electron/Vue 开发模式                              |
+| `pnpm build`                 | 构建主进程、preload 和渲染层到 out                      |
+| `pnpm start`                 | 启动构建后的 APP                                        |
+| `pnpm typecheck`             | TypeScript 与 Vue 类型检查                              |
+| `pnpm test`                  | 配置、隔离、命令及本地 SSH/Docker 协议行为测试          |
+| `pnpm test:remote`           | 实际 Electron 连接本地 SSH/MFA 服务，验证终端和双源日志 |
+| `pnpm test:desktop`          | 构建后验证真实 Electron 窗口与持久化                    |
+| `pnpm package:mac:installer` | 生成Mac arm64 DMG到dist/release                         |
+| `pnpm package:mac`           | 生成本机 ad-hoc 签名 Mac 测试 APP                       |
+| `pnpm package:win`           | 生成Windows x64 NSIS安装向导到dist/windows，不自动发布  |
+| `pnpm format`                | 格式化代码和文档                                        |
+| `pnpm check`                 | 格式、Markdown、链接、类型、行为测试与构建              |
 
 相对链接检查只验证本地文件，不抓取外站或验证标题锚点。桌面冒烟使用虚构项目和临时目录，远程冒烟仅连接本机隔离 SSH 服务，不连接生产；截图位于 output/playwright，不提交版本库。
 

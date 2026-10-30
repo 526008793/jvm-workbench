@@ -26,16 +26,16 @@ TraceLogDock 计划把这些操作放进桌面工作区：按项目打开窗口�
 | macOS           | 首发平台                                         | 本地桌面启动与多窗口冒烟已通过                     |
 | Windows         | 后续支持                                         | 尚未验证                                           |
 
-## Mac 与 Windows 安装
+## 直接下载安装
 
-先阅读[安装与首次使用](docs/installation.md)，包含源码准备、Mac APP安装、Windows安装向导、升级、服务器配置和日志/诊断操作。
+**不需要下载源码，也不需要Node.js或pnpm。** 在[发布页面](https://github.com/526008793/tracelogdock/releases/tag/v0.3.20)选择对应安装包：
 
-| 平台              | 构建命令                            | 产物                                             |
-| ----------------- | ----------------------------------- | ------------------------------------------------ |
-| Mac Apple Silicon | `pnpm package:mac`                  | `dist/mac-arm64/TraceLogDock.app`                |
-| Windows 10/11 x64 | `pnpm package:win`（在Windows执行） | `dist/windows/TraceLogDock-Setup-0.3.20-x64.exe` |
+| 系统                       | 直接下载                                                                                                                 | 安装方式                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| Mac Apple Silicon（M系列） | [Mac DMG](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-0.3.20-mac-arm64.dmg)         | 打开后把APP拖到“应用程序” |
+| Windows x64                | [Windows安装向导](https://github.com/526008793/tracelogdock/releases/download/v0.3.20/TraceLogDock-Setup-0.3.20-x64.exe) | 双击exe并按向导安装       |
 
-构建前执行`pnpm install --frozen-lockfile`；运行已构建APP不需Node.js或pnpm。仓库不保存安装包，目前没有GitHub Release下载页。Mac为本机ad-hoc签名测试包，Windows实机安装运行尚未验收；实际范围见[发布说明](docs/releasing.md)。
+私有仓库下载需要登录有访问权限的GitHub账号。安装包由GitHub原生runner构建并验证后作为Release附件提供；不提交到源码目录。Mac尚未公证、Windows未配置发布者签名，当前为预览版。安装、升级、服务器配置与使用方法见[安装指南](docs/installation.md)，构建维护见[发布流程](docs/releasing.md)。
 
 ## 当前使用方式
 

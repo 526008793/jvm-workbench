@@ -96,3 +96,9 @@ trace解析见`tests/trace.test.ts`，覆盖纳秒换算、累计/重复调用�
 AI验证使用临时Java/Mapper源码与本机HTTP模型服务，不调用真实模型、不外发业务源码。analysis测试覆盖密钥加密与项目隔离、端点更换不转移旧Key、真实方法/SQL/include提取、源码变化和重复类、模型引用/格式校验、错误正文不泄露、取消与无AI本地建议。Electron验证配置/模拟目录选择、无AI零模型请求、只读预览、手动分析、模型失败退回本地建议、自选自动分析不补跑历史。
 
 0.3.17新增runtime-source测试，覆盖独立方法加载器、类反编译去重、加载器歧义/活动任务/断线与取消、无AI读取及断线缓存绑定。Arthas行为测试验证jad归属及容器变化拒绝。真实Java21脚本smoke-deep-jvm在一次业务结束后通过真实jad读取多个私有/辅助方法，模型服务仍仅本机fixture；实际Docker兼容未验收。Electron回归覆盖独立AI导航、三步切换/参数保留、无AI运行源码、本地源码/运行源码AI来源切换、缓存与连通测试不启用AI。
+
+## 安装包发布验证
+
+`.github/workflows/release.yml`在原生Mac arm64/Windows x64 runner上分别运行`pnpm check`和安装包验证。Mac生成DMG并挂载、复制APP、核对codesign/架构/版本，再运行desktop/remote/multi-logs/arthas隔离界面流程。Windows静默安装实际NSIS，核对安装后exe架构和版本，运行相同隔离流程，并验证卸载删除安装exe。只有两平台都通过才发布Release附件与校验和。
+
+这些是维护中的发布测试，不属于可删除的一次性测试文件。手工探测脚本、临时截图与失败构建目录位于被忽略的output/dist中，可在无需继续排查时清理；保留最新可用APP，避免删除正在运行的安装目录。
