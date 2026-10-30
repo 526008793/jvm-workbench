@@ -81,7 +81,7 @@ async function waitWindow(title, expected) {
   console.error(
     'Native window states',
     await application.evaluate(({ app, BrowserWindow }) => ({
-      hidden: app.isHidden(),
+      hidden: app.isHidden?.(),
       windows: BrowserWindow.getAllWindows().map((w) => ({
         title: w.getTitle(),
         visible: w.isVisible(),
@@ -276,6 +276,13 @@ try {
       .minimize(),
   );
   await waitWindow('Project Alpha · TraceLogDock', { minimized: true });
+  // Windows can focus Beta when Alpha is minimized. Establish the intended recent window
+  // explicitly before testing restoration, as the other focus-recency scenarios do below.
+  await application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.getTitle() === 'Project Alpha · TraceLogDock')
+      .emit('focus'),
+  );
   await application.evaluate(({ app }) => app.emit('activate'));
   await waitWindow('Project Alpha · TraceLogDock', {
     visible: true,
