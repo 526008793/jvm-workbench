@@ -183,6 +183,9 @@ try {
     if (!deleteCurrent)
       await alpha.locator('.service-link').filter({ hasText: 'catalog-service' }).click();
     await alpha.getByRole('button', { name: '删除服务 temporary-service', exact: true }).click();
+    await alpha
+      .getByRole('button', { name: '删除服务 temporary-service', exact: true })
+      .waitFor({ state: 'detached' });
     await alpha.getByRole('heading', { name: 'catalog-service', exact: true }).waitFor();
     assert.equal(
       await alpha.getByRole('button', { name: '删除服务 temporary-service', exact: true }).count(),
@@ -278,12 +281,12 @@ try {
   await waitWindow('Project Alpha · TraceLogDock', { minimized: true });
   // Windows can focus Beta when Alpha is minimized. Establish the intended recent window
   // explicitly before testing restoration, as the other focus-recency scenarios do below.
-  await application.evaluate(({ BrowserWindow }) =>
+  await application.evaluate(({ app, BrowserWindow }) => {
     BrowserWindow.getAllWindows()
       .find((w) => w.getTitle() === 'Project Alpha · TraceLogDock')
-      .emit('focus'),
-  );
-  await application.evaluate(({ app }) => app.emit('activate'));
+      .emit('focus');
+    app.emit('activate');
+  });
   await waitWindow('Project Alpha · TraceLogDock', {
     visible: true,
     minimized: false,
