@@ -61,6 +61,14 @@ async function openProject(manager, name) {
   return workspace;
 }
 
+async function dispatchActivation(event = 'activate') {
+  await application.evaluate(({ app }, event) => {
+    // Native activation handlers are async. A previous focus request must not satisfy this event.
+    globalThis.smokeFocusRequests.length = 0;
+    app.emit(event);
+  }, event);
+}
+
 async function waitWindow(title, expected) {
   const deadline = Date.now() + 6000;
   let state;
@@ -270,7 +278,7 @@ try {
   await alpha.locator('.project-switch').click();
   await waitWindow('TraceLogDock · 项目管理', { visible: true });
   // Emit the actual Electron event handled for a Dock click; manager must not become the target.
-  await application.evaluate(({ app }) => app.emit('activate'));
+  await dispatchActivation();
   await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
   await waitWindow('TraceLogDock · 项目管理', { visible: false });
   await application.evaluate(({ BrowserWindow }) =>
@@ -282,6 +290,7 @@ try {
   // Windows can focus Beta when Alpha is minimized. Establish the intended recent window
   // explicitly before testing restoration, as the other focus-recency scenarios do below.
   await application.evaluate(({ app, BrowserWindow }) => {
+    globalThis.smokeFocusRequests.length = 0;
     BrowserWindow.getAllWindows()
       .find((w) => w.getTitle() === 'Project Alpha · TraceLogDock')
       .emit('focus');
@@ -309,18 +318,18 @@ try {
     w.emit('focus');
   });
   await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
-  await application.evaluate(({ app }) => app.emit('second-instance'));
+  await dispatchActivation('second-instance');
   await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
   await waitWindow('TraceLogDock · 项目管理', { visible: false });
   await alpha.close();
   assert.equal(beta.isClosed(), false);
-  await application.evaluate(({ app }) => app.emit('activate'));
+  await dispatchActivation();
   await waitWindow('Project Beta · TraceLogDock', { focusRequested: true });
   const betaContext = await beta.evaluate(() => window.tracelogdock.context());
   assert.equal(betaContext.value.projectId, betaProject.id);
   await beta.close();
   const reopened = application.waitForEvent('window');
-  await application.evaluate(({ app }) => app.emit('activate'));
+  await dispatchActivation();
   const betaAgain = await reopened;
   await betaAgain.getByRole('button', { name: /服务器配置/ }).waitFor();
   assert.equal(
@@ -330,7 +339,7 @@ try {
   await waitWindow('TraceLogDock · 项目管理', { visible: false });
   await manager.close();
   assert.equal(betaAgain.isClosed(), false);
-  await application.evaluate(({ app }) => app.emit('activate'));
+  await dispatchActivation();
   await waitWindow('Project Beta · TraceLogDock', { focusRequested: true });
   assert.equal(
     application.windows().length,
