@@ -14,6 +14,35 @@ test('Docker log ranges preserve their distinct meanings', () => {
   assert.throws(() => buildLogCommand('catalog\nother-command', 'new', 0, ''), /换行/);
 });
 
+test('log time windows normalize timezone, finish bounded history, and reject invalid ordering', () => {
+  assert.equal(
+    buildLogCommand(
+      'catalog',
+      'range',
+      0,
+      '2026-10-29T09:00:00+08:00',
+      '2026-10-29T09:30:00+08:00',
+    ),
+    "docker logs --since '2026-10-29T01:00:00.000Z' --until '2026-10-29T01:30:00.000Z' --timestamps -- 'catalog'",
+  );
+  assert.equal(
+    buildLogCommand('catalog', 'range', 0, '2026-10-29T09:00:00+08:00'),
+    "docker logs --follow --since '2026-10-29T01:00:00.000Z' --timestamps -- 'catalog'",
+  );
+  assert.throws(() => buildLogCommand('catalog', 'range', 0, ''), /开始时间/);
+  assert.throws(() => buildLogCommand('catalog', 'range', 0, 'not-a-date'), /开始时间/);
+  for (const end of ['not-a-date', '2026-10-29T00:59:00Z', '2026-10-29T01:00:00Z'])
+    assert.throws(
+      () => buildLogCommand('catalog', 'range', 0, '2026-10-29T01:00:00Z', end),
+      /结束时间/,
+    );
+  // Parameters from unrelated modes must not silently bound a live stream.
+  assert.match(
+    buildLogCommand('catalog', 'new', 0, '', '2026-10-29T01:30:00Z'),
+    /--follow --tail 0/,
+  );
+});
+
 test(
   'shell quoting preserves spaces, quotes and command substitutions literally',
   { skip: process.platform === 'win32' },

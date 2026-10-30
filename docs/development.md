@@ -2,11 +2,11 @@
 
 ## 当前实现
 
-0.2.0 已实现配置与多窗口、SSH/MFA/内嵌终端、JumpServer 人工选机确认、容器发现和实时日志。Arthas 自动诊断与凭据持久化尚未实现。
+0.3.20已实现项目工作区、SSH/MFA/内嵌终端、目标认证复用、多实例日志、Arthas单次深入诊断、运行源码与可选AI分析；Mac已验证，Windows提供NSIS构建入口。安装步骤见[安装指南](installation.md)。
 
 ## 环境与启动
 
-要求 Node.js 22.12 或更新的受支持版本、pnpm 10.28.1 和 Git。桌面冒烟及本机打包当前在 macOS 验证，Windows 尚未验收。
+要求 Node.js 22.12 或更新的受支持版本、pnpm 10.28.1 和 Git。非Windows行为测试另需Python 3，用于隔离的真实PTY回归，桌面APP运行不依赖Python。桌面冒烟当前在macOS验证；已有Windows x64安装包构建入口，Windows实机安装/运行尚未验收，详见[发布流程](releasing.md)。
 
 ```bash
 corepack enable
@@ -28,7 +28,8 @@ pnpm dev
 | `pnpm test`         | 配置、隔离、命令及本地 SSH/Docker 协议行为测试          |
 | `pnpm test:remote`  | 实际 Electron 连接本地 SSH/MFA 服务，验证终端和双源日志 |
 | `pnpm test:desktop` | 构建后验证真实 Electron 窗口与持久化                    |
-| `pnpm package:mac`  | 生成本机测试用未签名 Mac APP                            |
+| `pnpm package:mac`  | 生成本机 ad-hoc 签名 Mac 测试 APP                       |
+| `pnpm package:win`  | 生成Windows x64 NSIS安装向导到dist/windows，不自动发布  |
 | `pnpm format`       | 格式化代码和文档                                        |
 | `pnpm check`        | 格式、Markdown、链接、类型、行为测试与构建              |
 
@@ -48,7 +49,7 @@ docs/           架构、开发及接入设计
 
 ## 配置位置
 
-macOS 默认使用 ~/Library/Application Support/TraceLogDock/projects.json，当前不持久化登录秘密，另有 known-hosts.json 保存主机信任。开发隔离可以通过 TRACELOGDOCK_USER_DATA 指定专门目录。应用默认空项目，不写入演示服务器或模拟日志。
+macOS 默认使用 ~/Library/Application Support/TraceLogDock/projects.json，passwords.json仅保存用户选择记住的系统加密密码，另有known-hosts.json保存主机信任。开发隔离可以通过 TRACELOGDOCK_USER_DATA 指定专门目录。应用默认空项目，不写入演示服务器或模拟日志。
 
 ## 工程约定
 
@@ -60,8 +61,14 @@ macOS 默认使用 ~/Library/Application Support/TraceLogDock/projects.json，�
 
 项目仅由所有者维护，暂不开源，不开放 Issues 或外部贡献流程。提交围绕明确行为组织，功能修改同步文档与必要验证，不添加外部协作者或自动创建依赖更新 PR 的配置。
 
-当前本机协议与界面流程已验证；后续仍需在授权测试目标验证真实 JumpServer 与 Docker，再接入 Arthas，见[验证计划](testing.md)。
+当前本机协议与界面流程已验证；后续仍需在授权测试目标验证真实 JumpServer 与 Docker，以及真实 JVM attach，见[验证计划](testing.md)。
 
 ## SSH 构建依赖
 
 ssh2 的可选 cpu-features 原生检测模块不参与安装，使用已验证的 JavaScript 路径，避免在 Electron ABI 下编译仅用于优化选择的模块。此项由 pnpm.ignoredOptionalDependencies 明确记录，不能因此跳过主机身份或认证验证。
+
+Arthas 协议行为见 tests/arthas.test.ts；`pnpm test:arthas` 在实际 Electron 中验证缺包安装与已有包复用的诊断流程，使用隔离 SSH/Arthas 响应，不代表真实增强验收。
+
+`pnpm test:passwords`使用实际Electron safeStorage验证记住、重启后使用、MFA与忘记密码。验证优先针对最终签名APP执行，避免开发Electron与产品APP共享钥匙串服务时产生身份差异；仅使用虚构密码和临时profile，不读取真实已保存凭据。
+
+本机ad-hoc包升级后，macOS可能因代码身份变化要求重新允许访问TraceLogDock Safe Storage。此原生钥匙串弹窗会阻塞同步safeStorage调用，进而阻塞桌面自动化；需要用户在系统窗口处理，随后重跑测试，不能静默修改钥匙串权限或把超时当作验证通过。

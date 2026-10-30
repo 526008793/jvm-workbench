@@ -1,6 +1,6 @@
 {
   "name": "tracelogdock",
-  "version": "0.2.0",
+  "version": "0.3.20",
   "private": true,
   "description": "Private desktop workbench for multi-project Docker logs and Arthas diagnostics.",
   "license": "UNLICENSED",
@@ -21,7 +21,11 @@
     "test": "tsx --test tests/*.test.ts",
     "test:desktop": "pnpm build && node scripts/smoke-desktop.mjs",
     "package:mac": "pnpm build && electron-builder --mac --dir",
-    "test:remote": "pnpm build && node scripts/smoke-remote.mjs"
+    "package:win": "pnpm build && electron-builder --win nsis --x64 --publish never --config.directories.output=dist/windows",
+    "test:remote": "pnpm build && node scripts/smoke-remote.mjs",
+    "test:arthas": "pnpm build && node scripts/smoke-arthas.mjs",
+    "test:passwords": "pnpm build && node scripts/smoke-passwords.mjs",
+    "test:multi-logs": "pnpm build && node scripts/smoke-multi-service-logs.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
@@ -66,12 +70,34 @@
       "out/**/*",
       "package.json"
     ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
         "dir"
       ],
-      "identity": null
+      "identity": "-",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "TraceLogDock需要连接你配置的内网SSH和JumpServer服务器，用于查看服务日志和执行诊断。"
+      },
+      "hardenedRuntime": false
     }
   }
 }

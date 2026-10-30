@@ -7,7 +7,11 @@ import executablePath from 'electron';
 
 const root = process.cwd();
 const appBinary = process.env.TRACELOGDOCK_SMOKE_EXECUTABLE ?? executablePath;
-const appArgs = process.env.TRACELOGDOCK_SMOKE_EXECUTABLE ? [] : ['.'];
+// Workspace initialization checks secure-storage availability; keep test profiles off the real keychain.
+const appArgs = [
+  ...(process.env.TRACELOGDOCK_SMOKE_EXECUTABLE ? [] : ['.']),
+  ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []),
+];
 const profile = await mkdtemp(join(tmpdir(), 'tracelogdock-desktop-'));
 const output = resolve(root, 'output/playwright');
 await mkdir(output, { recursive: true });
@@ -24,6 +28,17 @@ async function launch() {
     env: environment,
   });
   instance.on('window', (page) => page.on('pageerror', (error) => pageErrors.push(error.message)));
+  await instance.firstWindow();
+  // macOS may deny foreground focus to an automated app. Verify the native focus requests
+  // and deliver focus events explicitly for recency tests, without changing production policy.
+  await instance.evaluate(({ BrowserWindow }) => {
+    globalThis.smokeFocusRequests = [];
+    const focus = BrowserWindow.prototype.focus;
+    BrowserWindow.prototype.focus = function (...args) {
+      globalThis.smokeFocusRequests.push(this.id);
+      return focus.apply(this, args);
+    };
+  });
   return instance;
 }
 
@@ -38,6 +53,7 @@ async function createProject(page, name) {
 }
 
 async function openProject(manager, name) {
+  await manager.evaluate(() => window.tracelogdock.openManager());
   const opened = application.waitForEvent('window');
   await manager.getByRole('button', { name: `打开 ${name} 工作区`, exact: true }).click();
   const workspace = await opened;
@@ -45,15 +61,65 @@ async function openProject(manager, name) {
   return workspace;
 }
 
+async function waitWindow(title, expected) {
+  const deadline = Date.now() + 6000;
+  let state;
+  do {
+    state = await application.evaluate(({ BrowserWindow }, title) => {
+      const w = BrowserWindow.getAllWindows().find((w) => w.getTitle() === title);
+      return w
+        ? {
+            visible: w.isVisible(),
+            focusRequested: globalThis.smokeFocusRequests.at(-1) === w.id,
+            minimized: w.isMinimized(),
+          }
+        : undefined;
+    }, title);
+    if (state && Object.entries(expected).every(([key, value]) => state[key] === value)) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  console.error(
+    'Native window states',
+    await application.evaluate(({ app, BrowserWindow }) => ({
+      hidden: app.isHidden(),
+      windows: BrowserWindow.getAllWindows().map((w) => ({
+        title: w.getTitle(),
+        visible: w.isVisible(),
+        focusRequested: globalThis.smokeFocusRequests.at(-1) === w.id,
+        minimized: w.isMinimized(),
+      })),
+    })),
+  );
+  assert.fail(
+    `Window ${title} state ${JSON.stringify(state)} did not match ${JSON.stringify(expected)}`,
+  );
+}
+
 try {
   application = await launch();
   const manager = await application.firstWindow();
   await manager.getByRole('heading', { name: '每个项目，都在自己的工作区。' }).waitFor();
+  const appVersion = await application.evaluate(({ app }) => app.getVersion());
+  assert.equal(await manager.locator('.manager-top .version').innerText(), `v${appVersion}`);
   await createProject(manager, 'Project Alpha');
   await createProject(manager, 'Project Beta');
   await manager.screenshot({ path: join(output, 'projects.png') });
 
   const alpha = await openProject(manager, 'Project Alpha');
+  await alpha.getByRole('heading', { name: '服务器配置', exact: true }).waitFor();
+  assert.deepEqual(
+    await alpha
+      .locator('.workspace-nav > button')
+      .evaluateAll((buttons) => buttons.map((button) => button.querySelector('span').textContent)),
+    ['服务器配置', '服务日志', '方法诊断', 'AI 配置'],
+  );
+  assert.equal(await alpha.locator('.sidebar .version').innerText(), `v${appVersion}`);
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
+  await alpha.locator('.project-switch').click();
+  await waitWindow('TraceLogDock · 项目管理', { visible: true, focusRequested: true });
+  await manager.getByRole('button', { name: '打开 Project Alpha 工作区', exact: true }).click();
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
+  assert.equal(application.windows().length, 2, 'selecting the existing project reuses its window');
   await alpha.getByRole('button', { name: /服务器配置/ }).click();
   await alpha.getByRole('button', { name: '＋ 添加服务器', exact: true }).click();
   let form = alpha.getByRole('dialog');
@@ -72,6 +138,7 @@ try {
   assert.equal(await form.getByLabel('端口').inputValue(), '2222');
   await form.getByRole('button', { name: '保存配置', exact: true }).click();
   await alpha.getByRole('cell', { name: 'Server B', exact: true }).waitFor();
+  await alpha.screenshot({ path: join(output, 'server-first-page.png') });
 
   await alpha.getByRole('button', { name: /服务日志/ }).click();
   await alpha.getByRole('button', { name: '＋ 添加服务', exact: true }).click();
@@ -85,9 +152,43 @@ try {
 
   await form.getByRole('button', { name: '保存配置', exact: true }).click();
   await alpha.getByRole('heading', { name: 'catalog-service', exact: true }).waitFor();
-  await alpha
-    .getByText("docker logs --follow --tail 0 --timestamps -- 'catalog-a'", { exact: true })
-    .waitFor();
+  assert.equal(await alpha.locator('.instance-panel').count(), 0);
+  assert.equal(await alpha.locator('input[name="log-instance"][type="radio"]').count(), 2);
+  assert.equal(await alpha.locator('input[name="log-instance"]:checked').count(), 1);
+  assert.equal(await alpha.locator('.remote-connections').isVisible(), false);
+  assert.equal(await alpha.locator('.summary-grid').count(), 0);
+  assert.equal(await alpha.locator('.command-list').count(), 0);
+  assert.equal(await alpha.getByRole('button', { name: '复制命令', exact: true }).count(), 0);
+  await alpha.getByRole('button', { name: '编辑服务 catalog-service', exact: true }).click();
+  form = alpha.getByRole('dialog');
+  assert.equal(
+    await form.getByRole('button', { name: '移除服务配置', exact: true }).isVisible(),
+    true,
+  );
+  await form.getByLabel('服务名称').fill('catalog-renamed');
+  await form.getByRole('button', { name: '保存配置', exact: true }).click();
+  await alpha.getByRole('heading', { name: 'catalog-renamed', exact: true }).waitFor();
+  await alpha.getByRole('button', { name: '编辑服务 catalog-renamed', exact: true }).click();
+  form = alpha.getByRole('dialog');
+  assert.equal(await form.getByLabel('容器名称').first().inputValue(), 'catalog-a');
+  await form.getByLabel('服务名称').fill('catalog-service');
+  await form.getByRole('button', { name: '保存配置', exact: true }).click();
+  await alpha.getByRole('heading', { name: 'catalog-service', exact: true }).waitFor();
+  for (const deleteCurrent of [false, true]) {
+    await alpha.getByRole('button', { name: '新增服务', exact: true }).click();
+    form = alpha.getByRole('dialog');
+    await form.getByLabel('服务名称').fill('temporary-service');
+    await form.getByRole('button', { name: '保存配置', exact: true }).click();
+    await alpha.getByRole('heading', { name: 'temporary-service', exact: true }).waitFor();
+    if (!deleteCurrent)
+      await alpha.locator('.service-link').filter({ hasText: 'catalog-service' }).click();
+    await alpha.getByRole('button', { name: '删除服务 temporary-service', exact: true }).click();
+    await alpha.getByRole('heading', { name: 'catalog-service', exact: true }).waitFor();
+    assert.equal(
+      await alpha.getByRole('button', { name: '删除服务 temporary-service', exact: true }).count(),
+      0,
+    );
+  }
   await alpha.screenshot({ path: join(output, 'workspace.png') });
   await alpha.getByRole('button', { name: '＋ 新环境', exact: true }).click();
   form = alpha.getByRole('dialog');
@@ -107,17 +208,34 @@ try {
   await alpha.getByRole('heading', { name: 'catalog-service', exact: true }).waitFor();
 
   await alpha.getByRole('button', { name: /方法诊断/ }).click();
-  await alpha.getByLabel('完整类名').fill('com.example.CatalogService');
-  await alpha.getByLabel('方法名', { exact: true }).fill('query');
-  await alpha
-    .getByText("trace com.example.CatalogService query '#cost > 200' -n 5", { exact: true })
-    .waitFor();
-  await alpha.getByRole('button', { name: '复制命令', exact: true }).click();
-  const copied = await application.evaluate(({ clipboard }) => clipboard.readText());
-  assert.equal(copied, "trace com.example.CatalogService query '#cost > 200' -n 5");
+  await alpha.getByRole('heading', { name: 'Arthas 方法诊断', exact: true }).waitFor();
+  assert.equal(
+    await alpha.getByRole('button', { name: '接入 Arthas', exact: true }).isDisabled(),
+    true,
+  );
+  await alpha.getByRole('button', { name: '2 · 方法诊断', exact: true }).click();
+  assert.equal(
+    await alpha.getByRole('button', { name: '执行诊断', exact: true }).isDisabled(),
+    true,
+  );
   await alpha.screenshot({ path: join(output, 'diagnostics.png') });
 
   const beta = await openProject(manager, 'Project Beta');
+  await beta.getByRole('heading', { name: '服务器配置', exact: true }).waitFor();
+  await beta.getByRole('button', { name: '新增服务', exact: true }).click();
+  form = beta.getByRole('dialog');
+  await form.getByLabel('服务名称').fill('temporary-only');
+  await form.getByRole('button', { name: '保存配置', exact: true }).click();
+  await beta.locator('.service-link').filter({ hasText: 'temporary-only' }).click();
+  await beta.getByRole('heading', { name: 'temporary-only', exact: true }).waitFor();
+  await beta.getByRole('button', { name: '删除服务 temporary-only', exact: true }).click();
+  await beta.getByRole('heading', { name: '服务日志', exact: true }).waitFor();
+  assert.equal(await beta.locator('.service-entry').count(), 0);
+  assert.equal(
+    await beta.getByRole('button', { name: '开始日志', exact: true }).isDisabled(),
+    true,
+  );
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
   const all = await manager.evaluate(() => window.tracelogdock.listProjects());
   assert.equal(all.ok, true);
   const betaProject = all.value.find((project) => project.name === 'Project Beta');
@@ -145,25 +263,108 @@ try {
   const windowCount = application.windows().length;
   await alpha.evaluate((id) => window.tracelogdock.openProject(id), alphaProject.id);
   assert.equal(application.windows().length, windowCount);
+  await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
+  await alpha.locator('.project-switch').click();
+  await waitWindow('TraceLogDock · 项目管理', { visible: true });
+  // Emit the actual Electron event handled for a Dock click; manager must not become the target.
+  await application.evaluate(({ app }) => app.emit('activate'));
+  await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
+  await application.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.getTitle() === 'Project Alpha · TraceLogDock')
+      .minimize(),
+  );
+  await waitWindow('Project Alpha · TraceLogDock', { minimized: true });
+  await application.evaluate(({ app }) => app.emit('activate'));
+  await waitWindow('Project Alpha · TraceLogDock', {
+    visible: true,
+    minimized: false,
+    focusRequested: true,
+  });
+  // Focus, not creation order, decides which existing project is brought back.
+  await application.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find(
+      (w) => w.getTitle() === 'Project Beta · TraceLogDock',
+    );
+    w.focus();
+    w.emit('focus');
+  });
+  await waitWindow('Project Beta · TraceLogDock', { focusRequested: true });
+  await application.evaluate(({ BrowserWindow }) => {
+    const w = BrowserWindow.getAllWindows().find(
+      (w) => w.getTitle() === 'Project Alpha · TraceLogDock',
+    );
+    w.focus();
+    w.emit('focus');
+  });
+  await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
+  await application.evaluate(({ app }) => app.emit('second-instance'));
+  await waitWindow('Project Alpha · TraceLogDock', { focusRequested: true });
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
   await alpha.close();
   assert.equal(beta.isClosed(), false);
+  await application.evaluate(({ app }) => app.emit('activate'));
+  await waitWindow('Project Beta · TraceLogDock', { focusRequested: true });
   const betaContext = await beta.evaluate(() => window.tracelogdock.context());
   assert.equal(betaContext.value.projectId, betaProject.id);
+  await beta.close();
+  const reopened = application.waitForEvent('window');
+  await application.evaluate(({ app }) => app.emit('activate'));
+  const betaAgain = await reopened;
+  await betaAgain.getByRole('button', { name: /服务器配置/ }).waitFor();
+  assert.equal(
+    (await betaAgain.evaluate(() => window.tracelogdock.context())).value.projectId,
+    betaProject.id,
+  );
+  await waitWindow('TraceLogDock · 项目管理', { visible: false });
+  await manager.close();
+  assert.equal(betaAgain.isClosed(), false);
+  await application.evaluate(({ app }) => app.emit('activate'));
+  await waitWindow('Project Beta · TraceLogDock', { focusRequested: true });
+  assert.equal(
+    application.windows().length,
+    1,
+    'activation with a workspace does not recreate the manager',
+  );
   await application.close();
 
   application = await launch();
   const restored = await application.firstWindow();
-  await restored.getByRole('heading', { name: 'Project Alpha', exact: true }).waitFor();
-  await restored.getByRole('heading', { name: 'Project Beta', exact: true }).waitFor();
-  const data = await restored.evaluate(() => window.tracelogdock.listProjects());
+  await restored.getByRole('button', { name: /服务器配置/ }).waitFor();
+  const restoredContext = await restored.evaluate(() => window.tracelogdock.context());
+  assert.equal(restoredContext.value.kind, 'workspace');
+  assert.equal(restoredContext.value.projectId, betaProject.id);
+  assert.equal(application.windows().length, 1, 'restart opens only the recent project');
+  const pickerOpened = application.waitForEvent('window');
+  await restored.locator('.project-switch').click();
+  const picker = await pickerOpened;
+  await picker.getByRole('heading', { name: 'Project Alpha', exact: true }).waitFor();
+  await picker.getByRole('heading', { name: 'Project Beta', exact: true }).waitFor();
+  const data = await picker.evaluate(() => window.tracelogdock.listProjects());
   const persisted = data.value.find((project) => project.name === 'Project Alpha');
   assert.equal(persisted.environments[0].servers[0].host, 'app-a.example.invalid');
   assert.equal(persisted.environments[0].servers[1].kind, 'jumpserver');
   assert.equal(persisted.environments[0].services[0].instances.length, 2);
   assert.equal(persisted.environments[0].services[0].instances[0].containerName, 'catalog-a');
+  // Deleting a remembered project must not leave startup stuck on a nonexistent workspace.
+  await application.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });
+  });
+  const removedWorkspace = restored.waitForEvent('close');
+  await picker.evaluate((id) => window.tracelogdock.deleteProject(id), betaProject.id);
+  await removedWorkspace;
+  await application.close();
+  application = await launch();
+  const fallback = await application.firstWindow();
+  await fallback.getByRole('heading', { name: '每个项目，都在自己的工作区。' }).waitFor();
+  assert.equal(
+    (await fallback.evaluate(() => window.tracelogdock.context())).value.kind,
+    'manager',
+  );
   assert.deepEqual(pageErrors, []);
   console.log(
-    'Desktop smoke passed: project creation, server/service mapping, command copy, multi-window isolation, close isolation and restart persistence.',
+    'Desktop smoke passed: project creation, server/service mapping, diagnostic prerequisites, multi-window isolation, picker hide/show, recent-focus Dock/second-instance activation, minimized restore, closed-project reopen, recent-project restart, deletion fallback and configuration persistence.',
   );
   console.log(`Screenshots: ${output}`);
 } finally {

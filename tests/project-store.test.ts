@@ -116,3 +116,27 @@ test('removing one project preserves other projects', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('recent project survives restart without changing revisions and is cleared on deletion', async () => {
+  const { directory, file, store } = await fixture();
+  try {
+    assert.equal(await store.lastOpenedProject(), undefined);
+    const a = await store.create({ name: 'Alpha', description: '', environmentName: 'Staging' });
+    const b = await store.create({ name: 'Beta', description: '', environmentName: 'Staging' });
+    await store.rememberOpenedProject(a.id);
+    assert.equal(await new ProjectStore(file).lastOpenedProject(), a.id);
+    await store.rememberOpenedProject(b.id);
+    assert.equal(await new ProjectStore(file).lastOpenedProject(), b.id);
+    const saved = await store.save({ ...a, description: 'editor stayed valid' });
+    assert.equal(saved.revision, 1);
+    assert.equal(await store.lastOpenedProject(), b.id);
+    await assert.rejects(store.rememberOpenedProject('missing'), /不存在/);
+    assert.equal(await store.lastOpenedProject(), b.id);
+    await store.remove(b.id);
+    assert.equal(await new ProjectStore(file).lastOpenedProject(), undefined);
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).lastOpenedProjectId, undefined);
+    assert.equal((await store.list())[0].id, a.id);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

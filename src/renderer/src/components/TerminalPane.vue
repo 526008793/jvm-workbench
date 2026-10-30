@@ -78,4 +78,10 @@ onUnmounted(() => {
 });
 </script>
 
-<template><div ref="root" class="ssh-terminal" aria-label="服务器交互终端"></div></template>
+<template>
+  <!-- xterm handles wheel events first; consume the browser default even at scrollback boundaries. -->
+  <div class="ssh-terminal" aria-label="服务器交互终端" @wheel.prevent.stop>
+    <!-- FitAddon needs a parent whose measured height excludes the outer padding. -->
+    <div ref="root" class="terminal-mount"></div>
+  </div>
+</template>

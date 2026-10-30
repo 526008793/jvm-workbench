@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { ClientChannel } from 'ssh2';
+import { shellQuote } from '../../shared/commands';
 
 interface ActiveFrame {
   start: string;
@@ -75,9 +76,11 @@ export class FramedShell {
     };
     // The complete marker is absent from command text, so echoed input cannot masquerade as executed output.
     try {
-      this.channel.write(
-        `printf '\\036TLD_BEGIN_%s\\037\\n' '${token}'; ${command}; __tld_code=$?; printf '\\036TLD_END_%s:%s\\037\\n' '${token}' "$__tld_code"\r`,
-      );
+      // An interactive shell can discard the remainder of a command list on Ctrl+C. Keep the exit marker
+      // inside a child shell's INT trap, so cancelling a foreground job does not lose the target shell.
+      const interrupted = `printf '\\036TLD_END_%s:130\\037\\n' '${token}'; exit 0`;
+      const script = `trap ${shellQuote(interrupted)} INT; printf '\\036TLD_BEGIN_%s\\037\\n' '${token}'; ${command}; __tld_code=$?; trap - INT; printf '\\036TLD_END_%s:%s\\037\\n' '${token}' "$__tld_code"`;
+      this.channel.write(`sh -c ${shellQuote(script)}\r`);
     } catch (error) {
       this.active = undefined;
       throw error;

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { LogAssembler, type LogMessage } from './log-assembler';
 import type { Project, ServiceInstance } from '../../shared/models';
 import type {
   DockerContainer,
@@ -19,13 +20,14 @@ interface RunningLog {
   owner: number;
   task: LogTask;
   job?: StreamJob;
+  stopPromise?: Promise<void>;
   cancelled: boolean;
   ended: boolean;
-  buffers: Record<string, string>;
+  assembler: LogAssembler;
 }
 export class DockerService {
   private readonly running = new Map<string, RunningLog>();
-  private batches = new Map<number, LogRow[]>();
+  private batches = new Map<number, Map<string, LogRow>>();
   private readonly timers = new Map<number, ReturnType<typeof setTimeout>>();
   constructor(
     private readonly sessions: SessionManager,
@@ -59,30 +61,32 @@ export class DockerService {
     record.task.error = error;
     this.emit(record.owner, { type: 'log-state', task: { ...record.task } });
   }
-  private row(record: RunningLog, text: string, stream: LogRow['stream']): void {
+  private row(record: RunningLog, message: LogMessage): void {
     if (!this.running.has(record.task.id)) return;
-    const rows = this.batches.get(record.owner) ?? [];
-    rows.push({
-      id: randomUUID(),
+    let rows = this.batches.get(record.owner) ?? new Map<string, LogRow>();
+    rows.set(message.id, {
+      ...message,
       taskId: record.task.id,
+      serviceId: record.task.serviceId,
       instanceId: record.task.instanceId,
       serverId: record.task.serverId,
       containerName: record.task.containerName,
-      stream,
-      text,
-      receivedAt: Date.now(),
     });
-    if (rows.length > 4000)
-      rows.splice(0, rows.length - 2000, {
-        id: randomUUID(),
+    if (rows.size > 4000) {
+      rows = new Map([...rows].slice(-2000));
+      const id = randomUUID();
+      rows.set(id, {
+        id,
         taskId: record.task.id,
+        serviceId: record.task.serviceId,
         instanceId: record.task.instanceId,
         serverId: record.task.serverId,
         containerName: record.task.containerName,
-        stream,
+        stream: message.stream,
         text: '[日志输出过快，部分显示缓存已释放；可通过Docker或SLS查询原始记录]',
         receivedAt: Date.now(),
       });
+    }
     this.batches.set(record.owner, rows);
     if (!this.timers.has(record.owner))
       this.timers.set(
@@ -91,31 +95,18 @@ export class DockerService {
       );
   }
   private flush(owner: number): void {
-    const rows = this.batches.get(owner) ?? [];
+    const rows = [...(this.batches.get(owner)?.values() ?? [])];
     this.batches.delete(owner);
     this.timers.delete(owner);
     if (rows.length) this.emit(owner, { type: 'logs', rows });
   }
   private data(record: RunningLog, text: string, source: LogRow['stream']): void {
-    let pending = (record.buffers[source] ?? '') + text;
-    let newline: number;
-    while ((newline = pending.indexOf('\n')) >= 0) {
-      const line = pending.slice(0, newline).replace(/\r$/, '');
-      if (line) this.row(record, line, source);
-      pending = pending.slice(newline + 1);
-    }
-    // A single unbroken application message can be huge; display it in chunks rather than retaining it indefinitely.
-    while (pending.length > 65536) {
-      this.row(record, pending.slice(0, 65536), source);
-      pending = pending.slice(65536);
-    }
-    record.buffers[source] = pending;
+    if (!record.ended) record.assembler.write(text, source);
   }
   private finish(record: RunningLog, code: number | null, error?: string): void {
     if (record.ended) return;
     record.ended = true;
-    for (const [source, text] of Object.entries(record.buffers))
-      if (text) this.row(record, text, source as LogRow['stream']);
+    record.assembler.finish();
     if (code === null) this.state(record, 'unknown', error || '无法确认远端日志命令状态');
     else if (record.cancelled) this.state(record, 'stopped');
     else if (code === 0) this.state(record, 'ended');
@@ -155,7 +146,7 @@ export class DockerService {
           owner,
           cancelled: false,
           ended: false,
-          buffers: {},
+          assembler: new LogAssembler((message) => this.row(record, message)),
           task: {
             id: randomUUID(),
             projectId: project.id,
@@ -198,7 +189,7 @@ export class DockerService {
           }
           record.job = await this.sessions.stream(
             session,
-            buildLogCommand(metadata.id, request.mode, request.lines, request.since),
+            buildLogCommand(metadata.id, request.mode, request.lines, request.since, request.until),
             (text, source) => this.data(record, text, source),
             (code, error) => this.finish(record, code, error),
           );
@@ -213,11 +204,13 @@ export class DockerService {
           } else if (!record.ended) this.state(record, 'running');
           console.info('[docker] log task opened', {
             taskId: record.task.id,
+            serviceId: record.task.serviceId,
             serverId: instance.serverId,
           });
         } catch (error) {
           if (!record.ended) {
             record.ended = true;
+            record.assembler.finish();
             this.state(
               record,
               error instanceof RemoteCommandUncertainError
@@ -240,20 +233,26 @@ export class DockerService {
       return record;
     });
     await Promise.all(
-      records.map(async (record) => {
-        if (record.ended || ['stopped', 'ended', 'error'].includes(record.task.status)) return;
-        record.cancelled = true;
-        this.state(record, 'stopping');
-        if (!record.job) return;
-        const confirmed = await record.job.stop();
-        if (!record.ended) {
-          record.ended = true;
-          this.state(
-            record,
-            confirmed ? 'stopped' : 'unknown',
-            confirmed ? undefined : '无法确认远端任务结束，请到终端核对',
-          );
-        }
+      records.map((record) => {
+        // Repeated clicks share the same stop request; a second Ctrl+C could hit the parent target shell.
+        if (record.stopPromise) return record.stopPromise;
+        record.stopPromise = (async () => {
+          if (record.ended || ['stopped', 'ended', 'error'].includes(record.task.status)) return;
+          record.cancelled = true;
+          this.state(record, 'stopping');
+          if (!record.job) return;
+          const confirmed = await record.job.stop();
+          if (!record.ended) {
+            record.ended = true;
+            record.assembler.finish();
+            this.state(
+              record,
+              confirmed ? 'stopped' : 'unknown',
+              confirmed ? undefined : '无法确认远端任务结束，请到终端核对',
+            );
+          }
+        })();
+        return record.stopPromise;
       }),
     );
   }
@@ -277,7 +276,7 @@ export class DockerService {
       if (record.owner === owner) {
         record.cancelled = true;
         record.ended = true;
-        void record.job?.stop().catch(() => undefined);
+        void (record.stopPromise ?? record.job?.stop())?.catch(() => undefined);
         this.running.delete(id);
       }
     clearTimeout(this.timers.get(owner));

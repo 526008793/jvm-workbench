@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { version } from '../../../../package.json';
 import { reactive, ref } from 'vue';
 import type { Project } from '../../../shared/models';
 import { unwrap, errorMessage } from '../api';
@@ -61,7 +62,7 @@ async function remove(project: Project): Promise<void> {
     <header class="manager-top">
       <div class="brand">
         <span class="brand-mark">⌁</span>TraceLogDock
-        <span class="version">0.2 · 服务器接入版</span>
+        <span class="version">v{{ version }}</span>
       </div>
       <span class="muted">项目工作区</span>
     </header>

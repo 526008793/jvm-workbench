@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { version } from '../../../../package.json';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import type {
   Environment,
   Project,
@@ -7,15 +8,23 @@ import type {
   Service,
   ServiceInstance,
 } from '../../../shared/models';
-import { buildDiagnosticCommand, type DiagnosticKind } from '../../../shared/commands';
 import { unwrap, errorMessage } from '../api';
 import Modal from './Modal.vue';
 import RemoteWorkspace from './RemoteWorkspace.vue';
+import ArthasWorkspace from './ArthasWorkspace.vue';
+import AnalysisSettings from './AnalysisSettings.vue';
+import type { AnalysisConfiguration } from '../../../shared/analysis';
 
 const props = defineProps<{ project: Project }>();
 const emit = defineEmits<{ error: [message: string]; notice: [message: string] }>();
 const environmentId = ref(props.project.environments[0].id);
-const page = ref<'logs' | 'diagnostics' | 'servers'>('logs');
+const page = ref<'logs' | 'diagnostics' | 'servers' | 'ai'>('servers');
+const analysisConfiguration = ref<AnalysisConfiguration>();
+const workspaceContent = ref<HTMLElement>();
+watch(page, async () => {
+  await nextTick();
+  workspaceContent.value?.scrollTo({ top: 0 });
+});
 const serviceId = ref('');
 const search = ref('');
 const modal = ref<'environment' | 'server' | 'service' | null>(null);
@@ -33,13 +42,6 @@ const fields = reactive({
 const instanceFields = ref<ServiceInstance[]>([]);
 const remoteStates = ref<Record<string, string>>({});
 const remoteTaskCount = ref(0);
-const diagnostic = reactive({
-  kind: 'trace' as DiagnosticKind,
-  className: '',
-  method: '',
-  cost: 200,
-  count: 5,
-});
 const environment = computed(
   () =>
     props.project.environments.find((e) => e.id === environmentId.value) ??
@@ -53,21 +55,21 @@ const services = computed(() =>
 const selectedService = computed(() =>
   environment.value.services.find((s) => s.id === serviceId.value),
 );
-const command = computed(() => {
-  try {
-    return buildDiagnosticCommand(
-      diagnostic.kind,
-      diagnostic.className,
-      diagnostic.method,
-      diagnostic.cost,
-      diagnostic.count,
-    );
-  } catch {
-    return '';
-  }
-});
 const instanceCount = computed(() =>
   environment.value.services.reduce((n, s) => n + s.instances.length, 0),
+);
+const sectionTitle = computed(
+  () =>
+    ({ logs: '服务日志', diagnostics: '方法诊断', servers: '服务器配置', ai: 'AI 配置' })[
+      page.value
+    ],
+);
+const diagnosticConnected = computed(
+  () =>
+    Boolean(selectedService.value?.instances.length) &&
+    selectedService.value!.instances.every(
+      (instance) => remoteStates.value[instance.serverId] === '已连接',
+    ),
 );
 
 watch(
@@ -176,6 +178,7 @@ async function remove(kind: 'server' | 'service' | 'environment', id: string): P
       next.environments = next.environments.filter((e) => e.id !== id);
     }
     await unwrap(window.tracelogdock.saveProject(next));
+    if (kind === 'service') modal.value = null;
     emit('notice', '本地配置已移除');
   } catch (error) {
     emit('error', errorMessage(error));
@@ -187,17 +190,6 @@ function addInstance(): void {
     serverId: environment.value.servers[0]?.id ?? '',
     containerName: '',
   });
-}
-async function copy(text: string): Promise<void> {
-  try {
-    await unwrap(window.tracelogdock.copyCommand(text));
-    emit('notice', 'Arthas命令已复制，自动诊断尚未接入');
-  } catch (error) {
-    emit('error', errorMessage(error));
-  }
-}
-function serverName(id: string): string {
-  return environment.value.servers.find((s) => s.id === id)?.name ?? '服务器已移除';
 }
 async function useContainer(serverId: string, name: string): Promise<void> {
   if (!selectedService.value) return;
@@ -256,13 +248,17 @@ async function manager(): Promise<void> {
         </div>
       </div>
       <nav class="workspace-nav">
+        <button :class="{ active: page === 'servers' }" @click="page = 'servers'">
+          ▣ <span>服务器配置</span><span class="count">{{ environment.servers.length }}</span>
+        </button>
         <button :class="{ active: page === 'logs' }" @click="page = 'logs'">
           ▤ <span>服务日志</span
           ><span class="count">{{ environment.services.length }}</span></button
         ><button :class="{ active: page === 'diagnostics' }" @click="page = 'diagnostics'">
-          ⌁ <span>方法诊断</span></button
-        ><button :class="{ active: page === 'servers' }" @click="page = 'servers'">
-          ▣ <span>服务器配置</span><span class="count">{{ environment.servers.length }}</span>
+          ⌁ <span>方法诊断</span>
+        </button>
+        <button aria-label="AI 配置" :class="{ active: page === 'ai' }" @click="page = 'ai'">
+          ✦ <span>AI 配置</span>
         </button>
       </nav>
       <div class="service-section">
@@ -275,71 +271,97 @@ async function manager(): Promise<void> {
           class="service-search"
           aria-label="搜索服务"
           placeholder="搜索服务…"
-        /><button
-          v-for="service in services"
-          :key="service.id"
-          class="service-link"
-          :class="{ selected: serviceId === service.id }"
-          @click="
-            serviceId = service.id;
-            if (page === 'servers') page = 'logs';
-          "
-        >
-          <span class="service-dot"></span><span>{{ service.name }}</span
-          ><span class="count">{{ service.instances.length }}</span>
-        </button>
+        />
+        <div v-for="service in services" :key="service.id" class="service-entry">
+          <button
+            class="service-link"
+            :class="{ selected: serviceId === service.id }"
+            :title="service.name"
+            @click="
+              serviceId = service.id;
+              if (page === 'servers') page = 'logs';
+            "
+          >
+            <span class="service-dot"></span><span>{{ service.name }}</span
+            ><span class="count">{{ service.instances.length }}</span>
+          </button>
+          <button
+            class="service-action"
+            :aria-label="`编辑服务 ${service.name}`"
+            title="编辑服务"
+            @click="begin('service', service)"
+          >
+            ✎
+          </button>
+          <button
+            class="service-action danger"
+            :aria-label="`删除服务 ${service.name}`"
+            title="删除服务"
+            @click="remove('service', service.id)"
+          >
+            ×
+          </button>
+        </div>
         <p v-if="!services.length" class="sidebar-empty">
           {{ search ? '没有匹配的服务' : '添加服务并配置容器映射' }}
         </p>
       </div>
       <div class="sidebar-bottom">
-        <span class="status-dot"></span>服务器工作区<span class="version">v0.2.0</span>
+        <span class="status-dot"></span>服务器工作区<span class="version">v{{ version }}</span>
       </div>
     </aside>
     <main class="workspace-main">
       <header class="workspace-top">
         <div class="breadcrumb">
           {{ project.name }}<span>/</span>{{ environment.name }}<span>/</span
-          ><strong>{{
-            page === 'servers' ? '服务器配置' : page === 'diagnostics' ? '方法诊断' : '服务日志'
-          }}</strong>
+          ><strong>{{ sectionTitle }}</strong>
         </div>
         <button class="text-button" @click="manager">项目管理 ↗</button>
       </header>
-      <div class="workspace-content">
+      <div ref="workspaceContent" class="workspace-content">
         <div class="page-heading">
           <div>
             <div class="eyebrow">
               {{
-                page === 'servers'
-                  ? 'CONNECTION INVENTORY'
-                  : page === 'diagnostics'
-                    ? 'METHOD DIAGNOSTICS'
-                    : 'SERVICE OBSERVABILITY'
+                page === 'ai'
+                  ? 'AI CONFIGURATION'
+                  : page === 'servers'
+                    ? 'CONNECTION INVENTORY'
+                    : page === 'diagnostics'
+                      ? 'METHOD DIAGNOSTICS'
+                      : 'SERVICE OBSERVABILITY'
               }}
             </div>
             <h1>
               {{
-                page === 'servers'
-                  ? '服务器配置'
+                page === 'servers' || page === 'ai'
+                  ? sectionTitle
                   : (selectedService?.name ?? (page === 'diagnostics' ? '方法诊断' : '服务日志'))
               }}
             </h1>
             <p class="muted">
               {{
-                page === 'servers'
-                  ? '统一维护直连 SSH 和 JumpServer 服务器，按服务关联容器。'
-                  : '在同一个工作区管理服务的所有节点，保留每个实例的来源。'
+                page === 'ai'
+                  ? '独立配置模型服务、测试连通性，选择分析源码来源。'
+                  : page === 'diagnostics'
+                    ? '接入 JVM → 定位慢点 → 查看源码与分析建议。'
+                    : page === 'servers'
+                      ? '统一维护直连 SSH 和 JumpServer 服务器，按服务关联容器。'
+                      : '在同一个工作区管理服务的所有节点，保留每个实例的来源。'
               }}
             </p>
           </div>
           <button v-if="page === 'servers'" class="primary" @click="begin('server')">
             ＋ 添加服务器</button
-          ><button v-else class="primary" @click="begin('service', selectedService)">
+          ><button
+            v-else-if="page !== 'ai'"
+            class="primary"
+            @click="begin('service', selectedService)"
+          >
             {{ selectedService ? '编辑服务' : '＋ 添加服务' }}
           </button>
         </div>
-        <div class="summary-grid">
+        <div v-if="page === 'servers'" class="summary-grid">
           <div class="summary-card">
             <span>当前环境</span><strong>{{ environment.name }}</strong
             ><small>项目配置独立保存</small>
@@ -365,21 +387,35 @@ async function manager(): Promise<void> {
             ><small>JumpServer选机后需确认目标主机</small>
           </div>
         </div>
-        <RemoteWorkspace
-          :project="project"
-          :environment="environment"
-          :service="selectedService"
-          :view="page"
-          @error="emit('error', $event)"
-          @notice="emit('notice', $event)"
-          @status="
-            (states, count) => {
-              remoteStates = states;
-              remoteTaskCount = count;
-            }
-          "
-          @use-container="useContainer"
-        />
+        <AnalysisSettings v-show="page === 'ai'" @configured="analysisConfiguration = $event" />
+        <details
+          v-show="page !== 'ai'"
+          class="connection-surface"
+          :class="{ 'diagnostic-connections': page === 'diagnostics' }"
+          :open="page !== 'diagnostics' || !diagnosticConnected"
+        >
+          <summary v-show="page === 'diagnostics'">
+            服务器连接 ·
+            {{
+              diagnosticConnected ? '已就绪（点击展开终端与连接操作）' : '请连接并确认目标服务器'
+            }}
+          </summary>
+          <RemoteWorkspace
+            :project="project"
+            :environment="environment"
+            :service="selectedService"
+            :view="page"
+            @error="emit('error', $event)"
+            @notice="emit('notice', $event)"
+            @status="
+              (states, count) => {
+                remoteStates = states;
+                remoteTaskCount = count;
+              }
+            "
+            @use-container="useContainer"
+          />
+        </details>
         <section v-if="page === 'servers'" class="panel">
           <div class="panel-heading">
             <h2>连接清单</h2>
@@ -438,82 +474,15 @@ async function manager(): Promise<void> {
             </tbody>
           </table>
         </section>
-        <template v-else>
-          <section v-if="selectedService" class="panel instance-panel">
-            <div class="panel-heading">
-              <h2>
-                服务实例 <span class="count">{{ selectedService.instances.length }}</span>
-              </h2>
-              <button class="text-button danger" @click="remove('service', selectedService.id)">
-                移除服务配置
-              </button>
-            </div>
-            <div v-if="!selectedService.instances.length" class="panel-note">
-              尚未关联容器，点击“编辑服务”添加实例。
-            </div>
-            <div v-else class="instance-list">
-              <div
-                v-for="instance in selectedService.instances"
-                :key="instance.id"
-                class="instance-item"
-              >
-                <span class="service-dot"></span
-                ><strong class="mono">{{ instance.containerName }}</strong
-                ><span class="muted">{{ serverName(instance.serverId) }}</span
-                ><span class="pill">{{ remoteStates[instance.serverId] || '未连接' }}</span>
-              </div>
-            </div>
-          </section>
-          <section v-if="page === 'diagnostics'" class="panel diagnostic-panel">
-            <div class="panel-heading">
-              <h2>Arthas 快捷命令</h2>
-              <span class="pill">命令预览 · 尚未连接 JVM</span>
-            </div>
-            <div class="diagnostic-form">
-              <label
-                >完整类名<input
-                  v-model="diagnostic.className"
-                  placeholder="com.example.catalog.CatalogService" /></label
-              ><label>方法名<input v-model="diagnostic.method" placeholder="queryCatalog" /></label>
-            </div>
-            <div class="command-presets">
-              <button
-                v-for="preset in [
-                  { id: 'trace', name: '慢调用' },
-                  { id: 'watch', name: '参数与返回值' },
-                  { id: 'exception', name: '异常调用' },
-                  { id: 'monitor', name: '调用统计' },
-                  { id: 'stack', name: '调用来源' },
-                ]"
-                :key="preset.id"
-                :class="{ chosen: diagnostic.kind === preset.id }"
-                @click="diagnostic.kind = preset.id as DiagnosticKind"
-              >
-                {{ preset.name }}
-              </button>
-            </div>
-            <div class="diagnostic-options">
-              <label v-if="diagnostic.kind === 'trace'"
-                >耗时阈值（ms）<input
-                  v-model.number="diagnostic.cost"
-                  type="number"
-                  min="0" /></label
-              ><label v-if="diagnostic.kind !== 'monitor'"
-                >采集次数<input v-model.number="diagnostic.count" type="number" min="1"
-              /></label>
-            </div>
-            <p v-if="diagnostic.kind === 'monitor'" class="panel-note">
-              每 5 秒输出一次统计。此命令持续运行，使用时需在 Arthas 中停止。
-            </p>
-            <div class="command-preview">
-              <code>{{ command || '填写完整类名和方法名，预览 Arthas 命令' }}</code
-              ><button class="primary" :disabled="!command" @click="copy(command)">复制命令</button>
-            </div>
-            <p class="panel-note">
-              目前仅生成命令，不执行监控。后续接入将先确认容器、JVM 和候选方法，再按实例执行。
-            </p>
-          </section>
-        </template>
+        <ArthasWorkspace
+          v-show="page === 'diagnostics'"
+          :project="project"
+          :environment="environment"
+          :service="selectedService"
+          :analysis-configuration="analysisConfiguration"
+          @error="emit('error', $event)"
+          @notice="emit('notice', $event)"
+        />
       </div>
       <footer class="taskbar">
         <span
@@ -560,6 +529,9 @@ async function manager(): Promise<void> {
           ><label v-if="fields.kind === 'jumpserver'"
             >目标资产名称<input v-model="fields.assetName" placeholder="例如：生产应用节点 A"
           /></label>
+          <p v-if="fields.kind === 'jumpserver'" class="form-help">
+            每条配置对应一台目标服务器；其他目标可用相同堡垒机账号“复用登录”，分别在各自终端选机。
+          </p>
           <p class="form-help">
             此处只保存连接信息；在连接面板输入本次密码或选择私钥，MFA按服务器提示提交。
           </p></template
@@ -602,6 +574,14 @@ async function manager(): Promise<void> {
           </div></template
         >
         <div class="form-actions">
+          <button
+            v-if="modal === 'service' && editedId"
+            type="button"
+            class="text-button danger"
+            @click="remove('service', editedId)"
+          >
+            移除服务配置
+          </button>
           <button type="button" @click="modal = null">取消</button
           ><button class="primary" :disabled="busy">{{ busy ? '保存中…' : '保存配置' }}</button>
         </div>

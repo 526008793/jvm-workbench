@@ -12,10 +12,14 @@ export function generateFixtureKey(): string {
 export async function createSshFixture(
   options: {
     mfa?: boolean;
+    mfaAfterPassword?: boolean;
+    maxShellsPerConnection?: number;
     publicKey?: string;
     ignoreSignal?: boolean;
+    interruptDelayMs?: number;
     port?: number;
     hostKey?: string;
+    commandOutput?: (command: string) => string | undefined;
   } = {},
 ) {
   const logWriters = new Set<(text: string) => void>();
@@ -28,9 +32,26 @@ export async function createSshFixture(
     clients.add(client);
     client.on('error', () => undefined);
     client.on('close', () => clients.delete(client));
+    let passwordAccepted = false;
+    let openShells = 0;
     client.on('authentication', (context) => {
       if (context.username !== 'operator') {
         context.reject();
+        return;
+      }
+      // JumpServer can advertise password first and offer keyboard-interactive only after partial success.
+      if (options.mfaAfterPassword) {
+        if (!passwordAccepted) {
+          if (context.method === 'password' && context.password === 'fixture-password') {
+            passwordAccepted = true;
+            context.reject(['keyboard-interactive'], true);
+          } else context.reject(['password', 'publickey']);
+        } else if (context.method === 'keyboard-interactive') {
+          context.prompt([{ prompt: 'OTP Code:', echo: false }], (answers) => {
+            if (answers[0] === '123456') context.accept();
+            else context.reject(['keyboard-interactive']);
+          });
+        } else context.reject(['keyboard-interactive']);
         return;
       }
       if (
@@ -68,6 +89,8 @@ export async function createSshFixture(
         session.on('pty', (acceptPty) => acceptPty?.());
         session.on('window-change', (acceptChange) => acceptChange?.());
         function output(command: string): string {
+          const custom = options.commandOutput?.(command);
+          if (custom !== undefined) return custom;
           if (command.includes('docker ps'))
             return (
               JSON.stringify({
@@ -97,6 +120,11 @@ export async function createSshFixture(
             stream.write(message.subarray(0, 32));
             stream.write(message.subarray(32));
             stream.stderr.write('2026-10-29T01:00:02Z fixture-error-line\n');
+            if (info.command.includes('--until ') && !info.command.includes('--follow ')) {
+              stream.exit(0);
+              stream.end();
+              return;
+            }
             const write = (text: string) => stream.write(text + '\n');
             logWriters.add(write);
             stream.on('close', () => logWriters.delete(write));
@@ -113,8 +141,19 @@ export async function createSshFixture(
             active.end();
           }
         });
-        session.on('shell', (acceptShell) => {
+        session.on('shell', (acceptShell, rejectShell) => {
+          if (
+            options.maxShellsPerConnection !== undefined &&
+            openShells >= options.maxShellsPerConnection
+          ) {
+            rejectShell();
+            return;
+          }
           const stream = acceptShell();
+          openShells += 1;
+          stream.once('close', () => {
+            openShells -= 1;
+          });
           let line = '';
           let selected = false;
           let writer: ((text: string) => void) | undefined;
@@ -125,10 +164,18 @@ export async function createSshFixture(
           stream.on('data', (data: Buffer) => {
             for (const char of data.toString('utf8')) {
               if (char === '\x03') {
+                inputs.push(char);
+                if (options.ignoreSignal) continue;
                 if (token) {
                   if (writer) logWriters.delete(writer);
-                  stream.write(`\x1eTLD_END_${token}:130\x1f\r\n$ `);
+                  const stoppedToken = token;
                   token = undefined;
+                  const acknowledge = () => {
+                    if (!stream.destroyed && !stream.writableEnded)
+                      stream.write(`\x1eTLD_END_${stoppedToken}:130\x1f\r\n$ `);
+                  };
+                  if (options.interruptDelayMs) setTimeout(acknowledge, options.interruptDelayMs);
+                  else acknowledge();
                 }
                 continue;
               }
@@ -148,7 +195,10 @@ export async function createSshFixture(
                 } else stream.write('1 | example-app-a\r\nOpt> ');
                 continue;
               }
-              const marker = /'([a-f0-9]{24})'/.exec(command)?.[1];
+              const executed = command.startsWith('sh -c ')
+                ? command.slice(7, -1).replaceAll(`'"'"'`, "'")
+                : command;
+              const marker = /'([a-f0-9]{24})'/.exec(executed)?.[1];
               if (marker) {
                 commands.push(command);
                 stream.write(`\x1eTLD_BEGIN_${marker}\x1f\r\n`);
@@ -158,7 +208,7 @@ export async function createSshFixture(
                   logWriters.add(writer);
                   stream.write('2026-10-29T01:00:01Z fixture-pty-live-log\n');
                 } else {
-                  stream.write(output(command));
+                  stream.write(output(executed));
                   stream.write(`\x1eTLD_END_${marker}:0\x1f\r\n$ `);
                 }
               } else stream.write('fixture-target$ ');

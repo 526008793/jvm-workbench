@@ -359,3 +359,297 @@ test('stale connection form cannot dispatch credentials after the configured hos
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('JumpServer password-first authentication reaches MFA while interactive-only login is rejected', async () => {
+  const ctx = await setup({ mfaAfterPassword: true });
+  try {
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: 'server-a' };
+    const configured = server(ctx.fixture.port, 'jumpserver');
+    const failed = ctx.manager.connect(1, target, configured, {});
+    await until(() => ctx.manager.get(1, failed.id).view.status === 'error');
+    assert.ok(!ctx.events.some((e) => e.type === 'challenge' && e.challenge.kind === 'keyboard'));
+    const view = ctx.manager.connect(1, target, configured, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, view.id).shell));
+    assert.equal(ctx.manager.get(1, view.id).view.status, 'awaiting-target');
+    assert.ok(ctx.events.some((e) => e.type === 'challenge' && e.challenge.kind === 'keyboard'));
+    assert.deepEqual(ctx.fixture.commands, []);
+    assert.ok(!JSON.stringify(ctx.events).includes('fixture-password'));
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('one gateway password/MFA opens independent target PTYs and disconnecting the first keeps its sibling logs alive', async () => {
+  const ctx = await setup({ mfaAfterPassword: true });
+  const docker = new DockerService(ctx.manager, (_owner, event) => ctx.events.push(event));
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const b = { ...a, id: 'server-b', name: 'Goods', assetName: 'example-app-b' };
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const first = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, first.id).shell));
+    ctx.manager.input(1, first.id, '1\r');
+    await ctx.manager.confirmTarget(1, first.id);
+    const p = project();
+    p.environments[0].servers = [a, b];
+    p.environments[0].services[0].instances.push({
+      id: 'instance-b',
+      serverId: b.id,
+      containerName: 'catalog-a',
+    });
+    const request = {
+      projectId: 'alpha',
+      environmentId: 'staging',
+      serviceId: 'catalog',
+      instanceIds: ['instance-a'],
+      mode: 'new' as const,
+      lines: 0,
+      since: '',
+    };
+    const logsA = await docker.start(1, p, request);
+    const second = ctx.manager.connect(1, { ...target, serverId: b.id }, b, {}, first.id);
+    await until(() => Boolean(ctx.manager.get(1, second.id).shell));
+    assert.equal(ctx.manager.get(1, first.id).client, ctx.manager.get(1, second.id).client);
+    assert.notEqual(ctx.manager.get(1, first.id).shell, ctx.manager.get(1, second.id).shell);
+    assert.equal(ctx.manager.get(1, second.id).view.status, 'awaiting-target');
+    assert.throws(() => ctx.manager.findReady(1, { ...target, serverId: b.id }), /确认目标/);
+    ctx.manager.input(1, second.id, '1\r');
+    await ctx.manager.confirmTarget(1, second.id);
+    const logsB = await docker.start(1, p, { ...request, instanceIds: ['instance-b'] });
+    assert.equal(logsB[0].status, 'running');
+    assert.equal(
+      ctx.events.filter((e) => e.type === 'challenge' && e.challenge.kind === 'keyboard').length,
+      1,
+    );
+    await docker.stop(1, [logsA[0].id]);
+    ctx.manager.disconnect(1, first.id);
+    assert.equal(ctx.manager.get(1, second.id).view.status, 'ready');
+    ctx.fixture.emitLog('sibling-still-streaming');
+    await until(() =>
+      ctx.events.some(
+        (e) =>
+          e.type === 'logs' &&
+          e.rows.some(
+            (r) => r.taskId === logsB[0].id && r.text.includes('sibling-still-streaming'),
+          ),
+      ),
+    );
+    assert.equal(docker.list(1).find((t) => t.id === logsB[0].id)?.status, 'running');
+    const thirdServer = { ...b, id: 'server-c', assetName: 'example-app-c' };
+    const third = ctx.manager.connect(
+      1,
+      { ...target, serverId: thirdServer.id },
+      thirdServer,
+      {},
+      second.id,
+    );
+    await until(() => Boolean(ctx.manager.get(1, third.id).shell));
+    ctx.manager.disconnect(1, third.id);
+    assert.equal(ctx.manager.get(1, second.id).view.status, 'ready');
+    await docker.stop(1, [logsB[0].id]);
+    ctx.manager.disconnect(1, second.id);
+  } finally {
+    docker.disposeOwner(1);
+    await ctx.close();
+  }
+});
+
+test('a gateway that rejects a second PTY reports reuse failure without closing the first target', async () => {
+  const ctx = await setup({ mfaAfterPassword: true, maxShellsPerConnection: 1 });
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const first = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, first.id).shell));
+    const b = { ...a, id: 'server-b' };
+    const second = ctx.manager.connect(1, { ...target, serverId: b.id }, b, {}, first.id);
+    await until(() => ctx.manager.get(1, second.id).view.status === 'error');
+    assert.match(ctx.manager.get(1, second.id).view.error!, /并发通道/);
+    assert.equal(ctx.manager.get(1, first.id).view.status, 'awaiting-target');
+    ctx.manager.input(1, first.id, '1\r');
+    assert.equal((await ctx.manager.confirmTarget(1, first.id)).hostname, 'fixture-target');
+    assert.equal(
+      ctx.events.filter((e) => e.type === 'challenge' && e.challenge.kind === 'keyboard').length,
+      1,
+    );
+    const separate = ctx.manager.connect(1, { ...target, serverId: b.id }, b, {
+      password: 'fixture-password',
+    });
+    await until(() => Boolean(ctx.manager.get(1, separate.id).shell));
+    assert.notEqual(ctx.manager.get(1, first.id).client, ctx.manager.get(1, separate.id).client);
+    assert.equal(ctx.manager.get(1, first.id).view.status, 'ready');
+    assert.equal(
+      ctx.events.filter((e) => e.type === 'challenge' && e.challenge.kind === 'keyboard').length,
+      2,
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('gateway login reuse rejects other owners, projects, environments, users and endpoints', async () => {
+  const ctx = await setup();
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const first = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, first.id).shell));
+    const b = { ...a, id: 'server-b' };
+    const destination = { ...target, serverId: b.id };
+    assert.throws(() => ctx.manager.connect(2, destination, b, {}, first.id), /不属于/);
+    assert.throws(
+      () => ctx.manager.connect(1, { ...destination, projectId: 'beta' }, b, {}, first.id),
+      /不匹配/,
+    );
+    assert.throws(
+      () =>
+        ctx.manager.connect(1, { ...destination, environmentId: 'production' }, b, {}, first.id),
+      /不匹配/,
+    );
+    assert.throws(
+      () => ctx.manager.connect(1, destination, { ...b, username: 'another-user' }, {}, first.id),
+      /不匹配/,
+    );
+    assert.throws(
+      () =>
+        ctx.manager.connect(1, destination, { ...b, host: 'other.example.invalid' }, {}, first.id),
+      /不匹配/,
+    );
+    assert.throws(
+      () => ctx.manager.connect(1, destination, { ...b, kind: 'ssh' }, {}, first.id),
+      /不匹配/,
+    );
+    assert.equal(ctx.manager.list(1).length, 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('a shared gateway transport closing updates every target instead of leaving a sibling ready', async () => {
+  const ctx = await setup();
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const first = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, first.id).shell));
+    const b = { ...a, id: 'server-b' };
+    const second = ctx.manager.connect(1, { ...target, serverId: b.id }, b, {}, first.id);
+    await until(() => Boolean(ctx.manager.get(1, second.id).shell));
+    ctx.manager.get(1, first.id).client.destroy();
+    await until(() =>
+      [first, second].every((v) => ctx.manager.get(1, v.id).view.status === 'closed'),
+    );
+  } finally {
+    await ctx.close();
+  }
+});
+
+test('an unforwarded JumpServer interrupt stays unknown and requires confirmation only for that target', async () => {
+  const ctx = await setup({ ignoreSignal: true });
+  const docker = new DockerService(ctx.manager, () => undefined);
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const first = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, first.id).shell));
+    ctx.manager.input(1, first.id, '1\r');
+    await ctx.manager.confirmTarget(1, first.id);
+    const b = { ...a, id: 'server-b' };
+    const second = ctx.manager.connect(1, { ...target, serverId: b.id }, b, {}, first.id);
+    await until(() => Boolean(ctx.manager.get(1, second.id).shell));
+    ctx.manager.input(1, second.id, '1\r');
+    await ctx.manager.confirmTarget(1, second.id);
+    const logs = await docker.start(1, project(), {
+      projectId: 'alpha',
+      environmentId: 'staging',
+      serviceId: 'catalog',
+      instanceIds: ['instance-a'],
+      mode: 'new',
+      lines: 0,
+      since: '',
+    });
+    await until(() => ctx.manager.get(1, first.id).framed?.started === true);
+    await docker.stop(1, [logs[0].id]);
+    assert.equal(docker.list(1)[0].status, 'unknown');
+    assert.equal(ctx.manager.get(1, first.id).view.status, 'awaiting-target');
+    assert.equal(ctx.manager.get(1, second.id).view.status, 'ready');
+  } finally {
+    docker.disposeOwner(1);
+    await ctx.close();
+  }
+});
+
+test('a delayed JumpServer exit confirmation keeps the selected target ready after stopping logs', async () => {
+  const ctx = await setup({ interruptDelayMs: 1800 });
+  const docker = new DockerService(ctx.manager, () => undefined);
+  try {
+    const a = server(ctx.fixture.port, 'jumpserver');
+    const target = { projectId: 'alpha', environmentId: 'staging', serverId: a.id };
+    const view = ctx.manager.connect(1, target, a, { password: 'fixture-password' });
+    await until(() => Boolean(ctx.manager.get(1, view.id).shell));
+    ctx.manager.input(1, view.id, '1\r');
+    await ctx.manager.confirmTarget(1, view.id);
+    const logs = await docker.start(1, project(), {
+      projectId: 'alpha',
+      environmentId: 'staging',
+      serviceId: 'catalog',
+      instanceIds: ['instance-a'],
+      mode: 'new',
+      lines: 0,
+      since: '',
+    });
+    await until(() => ctx.manager.get(1, view.id).framed?.started === true);
+    await Promise.all([docker.stop(1, [logs[0].id]), docker.stop(1, [logs[0].id])]);
+    assert.equal(ctx.fixture.inputs.filter((value) => value === '\x03').length, 1);
+    assert.equal(docker.list(1)[0].status, 'stopped');
+    assert.equal(ctx.manager.get(1, view.id).view.status, 'ready');
+    assert.equal((await docker.discover(ctx.manager.get(1, view.id)))[0].name, 'catalog-a');
+  } finally {
+    docker.disposeOwner(1);
+    await ctx.close();
+  }
+});
+
+test('real SSH log continuation updates one message across delivery batches and separates the next header', async () => {
+  const ctx = await setup();
+  const docker = new DockerService(ctx.manager, (_owner, event) => ctx.events.push(event));
+  try {
+    const view = ctx.manager.connect(
+      1,
+      { projectId: 'alpha', environmentId: 'staging', serverId: 'server-a' },
+      server(ctx.fixture.port),
+      { password: 'fixture-password' },
+    );
+    await until(() => ctx.manager.get(1, view.id).view.status === 'ready');
+    const tasks = await docker.start(1, project(), {
+      projectId: 'alpha',
+      environmentId: 'staging',
+      serviceId: 'catalog',
+      instanceIds: ['instance-a'],
+      mode: 'new',
+      lines: 0,
+      since: '',
+    });
+    const updates = () => ctx.events.flatMap((e) => (e.type === 'logs' ? e.rows : []));
+    ctx.fixture.emitLog(
+      '2026-10-29T07:42:21.704000000Z 2026-10-29T15:42:21.704+08:00 INFO 6 --- SQL日志',
+    );
+    await until(() => updates().some((row) => row.text.includes('SQL日志')));
+    const first = updates().find((row) => row.text.includes('SQL日志'))!;
+    ctx.fixture.emitLog('2026-10-29T07:42:21.704000001Z 完整SQL：SELECT shop_id FROM shop_base');
+    await until(() => updates().some((row) => row.text.includes('完整SQL')));
+    const combined = updates().find((row) => row.text.includes('完整SQL'))!;
+    assert.equal(combined.id, first.id);
+    assert.match(combined.text, /SQL日志\n完整SQL/);
+    assert.ok(!first.text.includes('完整SQL'), 'delivered snapshots remain immutable');
+    ctx.fixture.emitLog(
+      '2026-10-29T07:42:21.704000002Z 2026-10-29T15:42:21.704+08:00 INFO 6 --- next-request',
+    );
+    await until(() => updates().some((row) => row.text.includes('next-request')));
+    assert.notEqual(updates().find((row) => row.text.includes('next-request'))!.id, first.id);
+    await docker.stop(1, [tasks[0].id]);
+  } finally {
+    docker.disposeOwner(1);
+    await ctx.close();
+  }
+});

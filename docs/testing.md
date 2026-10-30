@@ -2,9 +2,9 @@
 
 ## 当前仓库检查
 
-`pnpm check` 执行格式、Markdown、相对文件链接、Vue/TypeScript 类型、17项行为测试及应用构建。CI 在 Linux/Node.js 22 上运行相同命令。
+`pnpm check` 执行格式、Markdown、相对文件链接、Vue/TypeScript 类型、行为测试及应用构建。CI 在 Linux/Node.js 22 上运行相同命令。
 
-`pnpm test:desktop` 在实际 Electron 中验证创建项目、SSH/JumpServer配置、环境隔离、容器映射、命令复制、窗口归属与关闭隔离、重复打开聚焦及重启持久化。测试使用临时目录和虚构资产，没有真实 SSH/Docker/Arthas 连接。该基础冒烟不覆盖网络接入。
+`pnpm test:desktop` 在实际 Electron 中验证创建项目、SSH/JumpServer配置、环境隔离、容器映射、未接入诊断的禁用状态、窗口归属与关闭隔离、重复打开聚焦及重启持久化。测试使用临时目录和虚构资产，没有真实 SSH/Docker/Arthas 连接。该基础冒烟不覆盖网络接入。
 
 pnpm test:remote 通过真实 Electron 连接本机 SSH 隔离服务，覆盖主机确认、密码/MFA、人工选机、容器发现、双来源日志、暂停/筛选/停止、跨窗口拒绝与重载清理。Node 行为测试另覆盖私钥认证、指纹变化拒绝、UTF-8 分块、单通道分帧和未知停止状态。SSH 服务模拟 Docker 响应，这不是公司 JumpServer 版本或真实 Docker 引擎兼容验收。
 
@@ -39,10 +39,60 @@ pnpm test:remote 通过真实 Electron 连接本机 SSH 隔离服务，覆盖主
 | 关闭工作区     | 只清理该窗口任务，不影响其他工作区             |
 | APP 被强杀     | 验证远端实际状态，不宣称本地计时器仍有效       |
 
+## 0.3.19导航与服务管理
+
+Desktop回归覆盖服务器菜单首位/默认页、日志页无连接概览和命令、侧栏编辑改名及映射保留、删除非当前/当前/最后服务的选择回退与空状态。macOS下也使用模拟钥匙串，避免工作区初始化检查安全存储时读取现有系统密钥。remote/multi-logs/arthas回归按服务器配置先连接后进入日志/诊断操作，验证导航不丢连接与后台任务；诊断原命令复制能力保留。
+
 ## 自动化测试方向
 
 当前已验证配置原子持久化、并发/旧版本写入、损坏文件保护、引用完整性、工作区权限及命令语义。后续实现相关模块时再加入有业务价值的测试：认证/资产状态机用脱敏交互样本，任务管理覆盖多窗口归属和重复提交，日志处理覆盖分块、多行堆栈及实例来源。测试公共行为，不为简单取值和文案建立重复实现的测试。
 
-真实 SSH、Docker 和 Arthas 集成测试需要显式准备的隔离环境，不在仓库 CI 自动连接生产服务器。Mac 应用冒烟和签名验证在实际构建流程加入后执行。
+真实 SSH、Docker 和 Arthas 集成测试需要显式准备的隔离环境，不在仓库 CI 自动连接生产服务器。Mac 应用冒烟及打包产物的 `codesign --verify --deep --strict` 应在本机执行。
 
 连接提交同时绑定表单所见的服务器身份；主机/端口/用户名在其他窗口改变后，旧表单不能把凭据发往新目标。仅修改显示名称不会使已有连接失效。
+
+## Arthas 隔离验证
+
+`pnpm test:arthas` 覆盖实际 Electron 中的实例/JVM发现、缺包下载与已有包复用、接入核对、重载选择、命令复制、执行/停止/结果、ClassLoader参数、跨窗口拒绝和重载清理。Node 行为测试覆盖SSH及JumpServer分帧、无调用超时、未知停止状态、容器重启、错误PID/版本、候选失效与断线。fixture模拟Docker和Arthas HTTP响应，不加载真实agent，不证明真实增强或版本兼容。实际Docker/Arthas与公司JumpServer联调仍待进行。
+
+该界面回归在macOS下使用`--use-mock-keychain`隔离虚构凭据，避免新签名包等待现有钥匙串授权；不修改正式APP的safeStorage，也不验证真实系统加密。真实加密验证由下述记住密码专用脚本承担。
+
+0.3.18的remote与multi-logs界面回归同样使用模拟钥匙串。remote覆盖非合并radio/合并checkbox、仅显示所选实例但保留后台任务、发现列表关闭及复用展开、相对时间、日期秒级选择与UTC传参、非法顺序在SSH前拒绝、固定窗口结束和空结束时间持续跟随。固定窗口的退出由SSH fixture模拟，不据此声称已验收真实Docker日志驱动的历史保留范围。
+
+Mac 内网访问必须另外使用 Finder/LaunchServices 正常启动验证。终端子进程测试不覆盖本地网络隐私授权。针对真实目标的无凭据测试只需到达主机指纹挑战，不应自动信任主机、提交密码或执行业务命令。正常启动前后应核对代码签名身份为 app.tracelogdock.desktop，严格签名校验通过。
+
+JumpServer认证复用验证包括：单次密码/MFA后多目标独立PTY、一个通道读取日志时在另一个通道选机/运行命令、关闭首个或后续目标不影响其他通道、物理连接断开更新全部目标、拒绝跨工作区/环境/账号复用，以及服务器拒绝第二PTY时保留原目标。真实部署是否允许多个PTY仍需在该部署上通过“复用登录”验证，fixture通过不代替真实并发权限。
+
+## 记住密码验证
+
+PasswordStore行为测试验证密文跨实例读取、端点/项目/环境隔离、系统加密不可用时拒绝保存、解密/文件损坏不覆盖、并发写入和配置清理。认证集成验证错密码不保存、完成MFA后才提交、重启后savedPassword引用可登录、其他工作区无权读取/删除，以及认证期间忘记后不会被ready事件恢复。
+
+`scripts/smoke-passwords.mjs`针对打包APP使用真实safeStorage，覆盖重启后无明文回填直接连接、MFA仍被要求、忘记后再次重启仍清除。测试密码是虚构数据，profile会清理；系统加密密钥由OS管理，不在测试中删除，以免影响同APP已保存数据。
+
+`pnpm test:multi-logs`以实际Electron和SSH fixture验证一次堡垒机认证、两条独立目标PTY、跨服务切换不停止、后台结果缓存、合并来源及筛选、停止一个服务后另一个继续、清空范围和环境切换释放。不会据模拟响应声称实际目标部署已验收。
+
+日志停止另有真实PTY测试：通过Python pty启动隔离的bash/zsh，验证Ctrl+C后返回当前任务结束标记、目标shell仍可执行后续命令、嵌套引号不改变参数。zsh可复现旧inline命令丢失footer；bash在本机旧写法仍可输出footer，不假定所有shell行为相同。CI未安装的shell或Windows会跳过对应PTY用例。SSH fixture还验证延迟1.8秒退出确认不会丢失就绪、重复停止只发一次Ctrl+C、未转发中断仍未知。双服务Electron流程反复停止全部并断言两条目标仍ready、可直接再启动。
+
+`tests/arthas-package.test.ts` 使用真实POSIX shell与校验工具，在没有unzip/jar命令的PATH中验证启动JAR安装、已有JAR/完整包探测、失败清理、SHA-256拒绝、网络/版本/写入失败；不依赖联网。`pnpm test:remote` 另以实际Chromium滚轮验证终端空历史、内部历史、上下边界及终端外页面滚动。
+
+多行日志验证：`tests/log-assembler.test.ts`覆盖跨分块与不同纳秒时间戳的SQL续行、同毫秒不同日志头、空行/ANSI/异常堆栈、输出流与实例隔离、末尾未换行及超长分段；SSH集成测试验证跨推送批次稳定ID更新。`pnpm test:remote`通过实际Electron检查SQL整条显示、续行实时追加、整条筛选、暂停快照及独立异常记录，并断言不同窗口尺寸下终端screen和光标没有越过可视底边，兼测滚动传播。
+
+真实JVM回归可手动运行：`TRACELOGDOCK_ARTHAS_HOME=/path/to/arthas-4.0.5 TRACELOGDOCK_JAVA=/path/to/jdk/bin/java node scripts/smoke-arthas-jvm.mjs`。目录需为官方4.0.5完整发行包（含math-game.jar），脚本只启动/接入自己创建的临时JVM，复现旧-1端口错误，再通过生产ArthasService生成的启动命令验证boot缓存模式及完整包模式的真实attach、HTTP version/session与PID匹配。结束后终止临时JVM并清理目录；容器身份适配由测试提供，不代表真实Docker兼容验收，不在普通CI联网下载或连接生产。
+
+trace解析见`tests/trace.test.ts`，覆盖纳秒换算、累计/重复调用、代理层重复耗时、调用行号、多个样本、异常格式与下一步目标校验。`scripts/smoke-arthas.mjs`使用真实Electron覆盖耗时排序、原文折叠、自动回到原PID、真实子方法加载器、参数滚动定位、接口实现/多个加载器明确选择、只填参数不自动执行、新任务排序/历史折叠及失效连接禁用继续诊断。
+
+项目窗口回归：`scripts/smoke-desktop.mjs`覆盖首页隐藏/显式打开/再次选择隐藏、多项目窗口复用、activate与second-instance唤起最近窗口、最小化恢复、全部项目窗口关闭后的最近项目恢复、重启直接进最近项目及删除后首页回退。自动化环境可能不授予macOS前台焦点，脚本检查原生focus调用并派发focus事件验证最近顺序，同时实际检查窗口可见性与最小化状态。ProjectStore行为测试验证最近标记跨重启、删除清理、无效项目拒绝及项目编辑revision不被窗口切换改变。
+
+多层追踪：`tests/multi-trace.test.ts`覆盖字面量正则、内部类/美元符方法、额外子类排除、入口/加载器范围校验及单方法兼容；Arthas行为测试验证全部重载、构造器/抽象/本地方法排除、同加载器解析、执行前复核和不完整范围拒绝。Electron回归覆盖固定入口、添加其他类候选、私有方法列表选择、实际范围预览、修改失效、跨窗口拒绝及多层结果展示。
+
+真实验证可运行 `TRACELOGDOCK_ARTHAS_HOME=/path/to/arthas-4.0.5 TRACELOGDOCK_JAVA=/path/to/jdk/bin/java node scripts/smoke-multi-trace-jvm.mjs`，需要JDK的javac及预先解压的官方4.0.5包。脚本只创建/接入自身临时JVM，使用生产ArthasService解析范围、生成命令并执行，验证3类7方法、私有方法、排除未选子类、无关辅助调用不消耗入口采样，以及一次入口请求获得多层数据访问耗时和自动结束。Docker身份为测试适配，未连接生产。
+
+深入追踪验证：`tests/deep.test.ts`覆盖并发/递归入口配对、单调时钟计时、超过200次采样的累计、线程池后续栈排除、源码行及证据分类；Arthas行为测试覆盖专用会话停止、无调用超时、部分证据、容器重启与未知状态。Electron回归覆盖默认深入模式、无需下游范围、实时业务排行/等待线索、结束计时和折叠原文。
+
+真实JVM运行 `TRACELOGDOCK_ARTHAS_HOME=/path/to/arthas-4.0.5 TRACELOGDOCK_JAVA=/path/to/jdk/bin/java node scripts/smoke-deep-jvm.mjs`：只增强自身临时JVM的一个入口，一次导出自动采集Service/Assembler/私有方法/数据访问完整栈，验证执行中实时结果、源码行、真实总耗时、子类排除和自动会话停止。样例用多个约3秒休眠阶段验证采样，不把采样比例当精确耗时，不声称已验证生产CPU开销或真实Docker兼容。
+
+简明结论验证：deep行为测试验证同一慢点的重复路径/源码行合并、不重复输出父方法、SQL建议必须有数据库栈证据、保留调用位置和无业务栈不编造建议。Electron测试验证默认仅显示结论/代码位置/优化建议、单样本提示、诊断依据/原文默认折叠且可展开完整栈。
+
+AI验证使用临时Java/Mapper源码与本机HTTP模型服务，不调用真实模型、不外发业务源码。analysis测试覆盖密钥加密与项目隔离、端点更换不转移旧Key、真实方法/SQL/include提取、源码变化和重复类、模型引用/格式校验、错误正文不泄露、取消与无AI本地建议。Electron验证配置/模拟目录选择、无AI零模型请求、只读预览、手动分析、模型失败退回本地建议、自选自动分析不补跑历史。
+
+0.3.17新增runtime-source测试，覆盖独立方法加载器、类反编译去重、加载器歧义/活动任务/断线与取消、无AI读取及断线缓存绑定。Arthas行为测试验证jad归属及容器变化拒绝。真实Java21脚本smoke-deep-jvm在一次业务结束后通过真实jad读取多个私有/辅助方法，模型服务仍仅本机fixture；实际Docker兼容未验收。Electron回归覆盖独立AI导航、三步切换/参数保留、无AI运行源码、本地源码/运行源码AI来源切换、缓存与连通测试不启用AI。

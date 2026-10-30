@@ -1,4 +1,20 @@
+import type {
+  ArthasAgent,
+  AttachInput,
+  DiagnosticInput,
+  DiagnosticTask,
+  Jvm,
+  JvmTarget,
+  MethodCandidate,
+  TraceScopeInput,
+} from './arthas';
 import { z } from 'zod';
+import type {
+  AnalysisConfiguration,
+  SaveAnalysisInput,
+  SourceBundle,
+  AnalysisState,
+} from './analysis';
 import type {
   ChallengeAnswer,
   ConnectInput,
@@ -8,6 +24,8 @@ import type {
   LogTask,
   RemoteEvent,
   RemoteTarget,
+  PasswordTarget,
+  PasswordStatus,
 } from './remote';
 
 const id = z.string().min(1);
@@ -39,6 +57,7 @@ export const projectSchema = z.object({
 });
 export const configSchema = z.object({
   schemaVersion: z.literal(1),
+  lastOpenedProjectId: z.string().min(1).optional(),
   projects: z.array(projectSchema),
 });
 export const createProjectSchema = z.object({
@@ -57,6 +76,17 @@ export type WindowContext = { kind: 'manager' } | { kind: 'workspace'; projectId
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export interface DesktopApi {
+  analysisConfiguration(): Promise<ApiResult<AnalysisConfiguration>>;
+  saveAnalysisConfiguration(input: SaveAnalysisInput): Promise<ApiResult<AnalysisConfiguration>>;
+  chooseSourceRoot(): Promise<ApiResult<string | undefined>>;
+  testAnalysisConnection(): Promise<ApiResult<void>>;
+  sourceContext(taskId: string): Promise<ApiResult<SourceBundle>>;
+  analyzeSource(taskId: string): Promise<ApiResult<AnalysisState>>;
+  cancelSourceAnalysis(taskId: string): Promise<ApiResult<void>>;
+  sourceAnalysisState(taskId: string): Promise<ApiResult<AnalysisState>>;
+  onSourceAnalysis(callback: (state: AnalysisState) => void): () => void;
+  passwordStatus(input: PasswordTarget): Promise<ApiResult<PasswordStatus>>;
+  forgetPassword(input: PasswordTarget): Promise<ApiResult<void>>;
   listConnections(): Promise<ApiResult<ConnectionView[]>>;
   connect(input: ConnectInput): Promise<ApiResult<ConnectionView>>;
   disconnect(connectionId: string): Promise<ApiResult<void>>;
@@ -70,6 +100,18 @@ export interface DesktopApi {
   startLogs(input: LogRequest): Promise<ApiResult<LogTask[]>>;
   stopLogs(ids: string[]): Promise<ApiResult<void>>;
   listLogTasks(): Promise<ApiResult<LogTask[]>>;
+  discoverJvms(input: JvmTarget): Promise<ApiResult<Jvm[]>>;
+  attachArthas(input: AttachInput): Promise<ApiResult<ArthasAgent>>;
+  listArthasAgents(): Promise<ApiResult<ArthasAgent[]>>;
+  searchMethods(
+    agentId: string,
+    query: string,
+    packageName: string,
+  ): Promise<ApiResult<MethodCandidate[]>>;
+  resolveTraceScope(input: TraceScopeInput): Promise<ApiResult<MethodCandidate[]>>;
+  startDiagnostic(input: DiagnosticInput): Promise<ApiResult<DiagnosticTask>>;
+  stopDiagnostic(id: string): Promise<ApiResult<void>>;
+  listDiagnosticTasks(): Promise<ApiResult<DiagnosticTask[]>>;
   onRemoteEvent(callback: (event: RemoteEvent) => void): () => void;
   context(): Promise<ApiResult<WindowContext>>;
   listProjects(): Promise<ApiResult<Project[]>>;

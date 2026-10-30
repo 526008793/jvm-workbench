@@ -89,6 +89,23 @@ export class ProjectStore {
       const index = config.projects.findIndex((project) => project.id === id);
       if (index < 0) throw new Error('项目不存在');
       config.projects.splice(index, 1);
+      if (config.lastOpenedProjectId === id) delete config.lastOpenedProjectId;
+    });
+  }
+
+  async lastOpenedProject(): Promise<string | undefined> {
+    await this.queue;
+    const config = await this.read();
+    return config.projects.some((project) => project.id === config.lastOpenedProjectId)
+      ? config.lastOpenedProjectId
+      : undefined;
+  }
+
+  rememberOpenedProject(id: string): Promise<void> {
+    return this.mutate((config) => {
+      if (!config.projects.some((project) => project.id === id)) throw new Error('项目不存在');
+      // Window selection is app metadata; it must not invalidate an editor's project revision.
+      config.lastOpenedProjectId = id;
     });
   }
 }

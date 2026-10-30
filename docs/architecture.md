@@ -2,7 +2,7 @@
 
 ## 状态与原则
 
-这是分阶段架构。0.2.0 已实现工作区、配置、IPC、SSH/MFA、终端及 Docker 日志。凭据持久化与 Arthas 自动诊断仍待实现。首期使用本地 Electron APP，按项目打开工作区，连接管理和远程任务在主进程执行。共享的是能力实现，项目、凭据和任务归属保持明确。
+这是分阶段架构。0.3.0 已实现工作区、配置、IPC、SSH/MFA、终端及 Docker 日志。已加入 Arthas 包探测/缺包下载诊断及可选的系统加密密码保存。首期使用本地 Electron APP，按项目打开工作区，连接管理和远程任务在主进程执行。共享的是能力实现，项目、凭据和任务归属保持明确。
 
 ## 进程与模块
 
@@ -114,13 +114,13 @@ stateDiagram-v2
 
 ## 持久化与日志
 
-项目配置采用 schemaVersion=1 的本地 JSON，通过单例主进程的写队列及临时文件原子替换持久化。项目 revision 用于拒绝旧窗口覆盖新配置；文件损坏时报告错误，不初始化覆盖。当前连接凭据仅保留内存，不写入项目配置。主机信任单独存于 known-hosts.json。未来若增加记住凭据，单独加密，配置仅存引用；safeStorage 不可用时不降级明文保存。macOS 与 Windows 的底层保护和迁移差异需要发布前验证。
+项目配置采用 schemaVersion=1 的本地 JSON，通过单例主进程的写队列及临时文件原子替换持久化。项目 revision 用于拒绝旧窗口覆盖新配置；文件损坏时报告错误，不初始化覆盖。未选择记住的连接凭据只保留内存，不写入项目配置。主机信任单独存于 known-hosts.json。PasswordStore使用safeStorage加密密码，独立原子写入passwords.json，项目/环境和端点账号共同绑定；只有SSH成功事件才提交待保存密文，失败或关闭清除待保存记录，忘记操作会先取消并发认证中的保存。safeStorage不可用时不降级明文保存，renderer无取回明文的API。macOS 与 Windows 的底层保护和迁移差异需要发布前验证。
 
 诊断结果默认只在内存展示，不默认长期保存参数和返回值。应用自身日志记录任务标识、状态转换和可定位的错误，不能记录密码、私钥、OTP 或未经处理的业务对象。
 
 ## 推荐代码布局
 
-当前代码布局如下，Arthas 执行模块将在下一阶段加入：
+当前代码布局如下：
 
 ```text
 src/
@@ -128,6 +128,7 @@ src/
 │  ├─ index.ts
 │  ├─ connections/
 │  ├─ docker/
+│  ├─ arthas/
 │  ├─ workspaces/
 │  └─ storage/
 ├─ preload/
@@ -146,3 +147,13 @@ src/
 RemoteController 在每次远程操作前从本机项目配置解析目标，核对当前窗口项目；不信任前端传入的 host 或任意路径。SessionManager 管理主机信任、交互认证和连接，DockerService 管理容器发现、身份核对、日志任务及批量输出。
 
 JumpServer 的 FramedShell 采用随机标记，从实际执行输出而非输入回显中识别结果；一个 shell 排他使用，不假定支持多目标通道。直连 SSH 则使用独立 exec。任务和连接均按工作区隔离，配置删除/修改会清理受影响资源。
+
+## Arthas 工具包与接入实现
+
+ArthasService 通过容器内 curl 调用 loopback HTTP API。JVM 选择绑定工作区、连接 ID、容器 ID/StartedAt、PID/startTicks 和 UID；执行前重新核对身份。工具包固定验证 4.0.5，缺包时按 JVM UID 从 Maven Central 下载可执行官方启动 JAR并校验固定 SHA-256；已有完整包或boot JAR直接复用。仅boot模式通过--use-version 4.0.5固定依赖，由启动器使用Java下载/解压，不依赖系统unzip。启动器缓存限定到所选目录，JAR下载和首次启动分别使用150秒命令超时，完成后再次检查容器/JVM及工作区有效性。attach 后通过 version/session 核对版本与 javaPid，不全局停止 agent。
+
+方法搜索使用业务包限定的 sm -d，候选包含完整类名、描述符、参数和 ClassLoader。每个任务独立 init_session/async_exec/pull_results，停止发送 interrupt_job 并核对 jobId/TERMINATED，最后 close_session。最长运行时间依靠应用计时器请求中断；未知状态保留，掉线后无自动恢复。界面每任务保留最近200条结果，只存在内存中。
+
+窗口激活：打开项目后隐藏manager，现有工作区按focus事件维护最近顺序。Dock activate和second-instance复用同一入口，优先restore/show/focus最近现有工作区；无工作区时通过ProjectStore.lastOpenedProject读取可选lastOpenedProjectId，启动时同样恢复。openProject使用现有原子队列保存最近选择，项目revision不变；新窗口ready-to-show后才隐藏首页，防止加载期间无可见入口。原生窗口拦截通用HTML标题更新，保留项目名称。
+
+多层追踪通过arthas:scope解析当前JVM/同一ClassLoader下的明确类与方法名组合；只读枚举可用methods=*，实际执行只采用解析出的具体方法。diagnosticSchema新增trace-multi与scope元数据，主进程在init_session前重新解析并比较完整签名集合，拒绝范围变化或遗漏重载。命令的原始类/方法使用字面量正则，排除集合外子类；输出条件绑定最外层入口类/方法，无#cost阈值。入口与扩展候选分离，修改范围/入口/连接后必须重新核对。

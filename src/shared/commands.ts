@@ -1,9 +1,9 @@
 import type { Server } from './models';
 
-export type LogMode = 'new' | 'recent' | 'since';
+export type LogMode = 'new' | 'recent' | 'since' | 'range';
 export type DiagnosticKind = 'trace' | 'watch' | 'exception' | 'monitor' | 'stack';
 
-// Commands are copied for manual use in this milestone; nothing here executes a remote shell.
+// Quote shell arguments literally; diagnostic templates use the separate Arthas command parser.
 export function shellQuote(value: string): string {
   if (!value || /[\r\n\0]/.test(value)) throw new Error('参数不能为空或包含换行');
   return `'${value.replaceAll("'", "'\"'\"'")}'`;
@@ -14,6 +14,7 @@ export function buildLogCommand(
   mode: LogMode,
   lines: number,
   since: string,
+  until = '',
 ): string {
   let scope = '--tail 0';
   if (mode === 'recent') {
@@ -21,8 +22,19 @@ export function buildLogCommand(
     scope = `--tail ${lines}`;
   } else if (mode === 'since') {
     scope = `--since ${shellQuote(since)}`;
+  } else if (mode === 'range') {
+    const start = Date.parse(since);
+    const end = until ? Date.parse(until) : undefined;
+    if (!Number.isFinite(start)) throw new Error('请选择有效的日志开始时间');
+    if (end !== undefined && (!Number.isFinite(end) || end <= start))
+      throw new Error('日志结束时间必须晚于开始时间');
+    // Absolute UTC timestamps keep the APP's selected time independent of the server timezone.
+    scope = `--since ${shellQuote(new Date(start).toISOString())}`;
+    if (end !== undefined) scope += ` --until ${shellQuote(new Date(end).toISOString())}`;
   }
-  return `docker logs --follow ${scope} --timestamps -- ${shellQuote(container)}`;
+  // A bounded history query completes on its own; an open end keeps following new output.
+  const follow = mode === 'range' && until ? '' : ' --follow';
+  return `docker logs${follow} ${scope} --timestamps -- ${shellQuote(container)}`;
 }
 
 export function buildDiagnosticCommand(
@@ -56,4 +68,9 @@ export function buildDiagnosticCommand(
 // Credential submission and live sessions bind to connection-relevant fields, not a mutable display name.
 export function connectionBinding(server: Server): string {
   return JSON.stringify([server.kind, server.host, server.port, server.username, server.assetName]);
+}
+
+// Target assets have independent PTYs but may share authentication to the same gateway account.
+export function gatewayBinding(server: Server): string {
+  return JSON.stringify([server.kind, server.host.toLowerCase(), server.port, server.username]);
 }

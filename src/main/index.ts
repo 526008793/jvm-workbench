@@ -1,4 +1,5 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu } from 'electron';
+import { PasswordStore } from './storage/password-store';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, safeStorage } from 'electron';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { channels } from '../shared/channels';
@@ -7,6 +8,9 @@ import { remoteChannels } from '../shared/channels';
 import { RemoteController } from './connections/remote-controller';
 import { ProjectStore } from './storage/project-store';
 import { ContextRegistry } from './workspaces/context-registry';
+import { AnalysisController } from './analysis/analysis-controller';
+import { AnalysisSettingsStore } from './analysis/settings-store';
+import { analysisChannels } from '../shared/channels';
 
 if (process.env.TRACELOGDOCK_USER_DATA)
   app.setPath('userData', resolve(process.env.TRACELOGDOCK_USER_DATA));
@@ -16,6 +20,7 @@ const workspaces = new Map<string, BrowserWindow>();
 let manager: BrowserWindow | undefined;
 let store: ProjectStore;
 let remote: RemoteController;
+let analysis: AnalysisController;
 
 function broadcast(): void {
   for (const window of BrowserWindow.getAllWindows()) window.webContents.send(channels.changed);
@@ -41,14 +46,23 @@ function createWindow(context: WindowContext, title: string): BrowserWindow {
   const senderId = window.webContents.id;
   registry.register(senderId, context);
   window.on('closed', () => {
+    analysis.disposeOwner(senderId);
     remote.disposeOwner(senderId);
     registry.remove(senderId);
   });
-  window.webContents.on('render-process-gone', () => remote.disposeOwner(senderId));
+  window.webContents.on('render-process-gone', () => {
+    remote.disposeOwner(senderId);
+    analysis.disposeOwner(senderId);
+  });
   window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => {
-    if (isMainFrame) remote.disposeOwner(senderId);
+    if (isMainFrame) {
+      remote.disposeOwner(senderId);
+      analysis.disposeOwner(senderId);
+    }
   });
   window.once('ready-to-show', () => window.show());
+  // All renderers share one HTML title; retain each native window's project-specific title.
+  window.on('page-title-updated', (event) => event.preventDefault());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event) => event.preventDefault());
   window.webContents.on('render-process-gone', (_event, detail) => {
@@ -62,6 +76,7 @@ function createWindow(context: WindowContext, title: string): BrowserWindow {
 
 function openManager(): void {
   if (manager && !manager.isDestroyed()) {
+    if (manager.isMinimized()) manager.restore();
     manager.show();
     manager.focus();
     return;
@@ -75,10 +90,16 @@ function openManager(): void {
 async function openProject(id: string): Promise<void> {
   const project = (await store.list()).find((value) => value.id === id);
   if (!project) throw new Error('项目不存在');
+  await store.rememberOpenedProject(id);
   const existing = workspaces.get(id);
   if (existing && !existing.isDestroyed()) {
+    if (existing.isMinimized()) existing.restore();
     existing.show();
     existing.focus();
+    manager?.hide();
+    // Map order tracks focus recency even when show/focus targets an already focused window.
+    workspaces.delete(id);
+    workspaces.set(id, existing);
     return;
   }
   const window = createWindow(
@@ -87,6 +108,29 @@ async function openProject(id: string): Promise<void> {
   );
   workspaces.set(id, window);
   window.on('closed', () => workspaces.delete(id));
+  window.on('focus', () => {
+    workspaces.delete(id);
+    workspaces.set(id, window);
+  });
+  // Keep the picker available until the new workspace can actually be displayed.
+  window.once('ready-to-show', () => {
+    manager?.hide();
+    window.focus();
+  });
+}
+
+async function activateWorkspace(): Promise<void> {
+  try {
+    const recent = [...workspaces.entries()].reverse().find(([, window]) => !window.isDestroyed());
+    const id = recent?.[0] ?? (await store.lastOpenedProject());
+    if (id) await openProject(id);
+    else openManager();
+  } catch (error) {
+    console.warn('[workspaces] recent workspace could not be restored', {
+      error: (error as Error).message,
+    });
+    openManager();
+  }
 }
 
 function registerHandlers(): void {
@@ -111,6 +155,7 @@ function registerHandlers(): void {
     });
   };
   remote.register(handle);
+  analysis.register(handle);
   handle(channels.context, (sender) => registry.get(sender));
   handle(channels.list, async (sender) => {
     const context = registry.get(sender);
@@ -151,6 +196,8 @@ function registerHandlers(): void {
       cancelId: 0,
     });
     if (result.response !== 1) return;
+    await remote.removeProjectPasswords(id);
+    await analysis.removeProject(id);
     await store.remove(id);
     console.info('[projects] removed', { projectId: id });
     workspaces.get(id)?.close();
@@ -167,10 +214,12 @@ function registerHandlers(): void {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on('second-instance', () => openManager());
+  app.on('second-instance', () => {
+    void app.whenReady().then(activateWorkspace);
+  });
   void app
     .whenReady()
-    .then(() => {
+    .then(async () => {
       store = new ProjectStore(join(app.getPath('userData'), 'projects.json'));
       remote = new RemoteController(
         store,
@@ -192,6 +241,33 @@ else {
             properties: ['openFile'],
           });
           return result.canceled ? undefined : result.filePaths[0];
+        },
+        new PasswordStore(join(app.getPath('userData'), 'passwords.json'), safeStorage),
+      );
+      analysis = new AnalysisController(
+        registry,
+        remote.arthas,
+        new AnalysisSettingsStore(
+          join(app.getPath('userData'), 'analysis-settings.json'),
+          safeStorage,
+        ),
+        async (owner) => {
+          const window = BrowserWindow.getAllWindows().find(
+            (window) => window.webContents.id === owner,
+          );
+          if (!window) throw new Error('工作区已关闭');
+          const result = await dialog.showOpenDialog(window, {
+            title: '选择与部署版本对应的Java源码根目录',
+            properties: ['openDirectory'],
+          });
+          return result.canceled ? undefined : result.filePaths[0];
+        },
+        (owner, state) => {
+          const window = BrowserWindow.getAllWindows().find(
+            (window) => window.webContents.id === owner,
+          );
+          if (window && !window.isDestroyed())
+            window.webContents.send(analysisChannels.event, state);
         },
       );
       registerHandlers();
@@ -232,8 +308,10 @@ else {
           { label: '窗口', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'front' }] },
         ]),
       );
-      openManager();
-      app.on('activate', openManager);
+      app.on('activate', () => {
+        void activateWorkspace();
+      });
+      await activateWorkspace();
     })
     .catch((error: unknown) => {
       console.error('[app] startup failed', error);
@@ -241,7 +319,10 @@ else {
     });
 }
 app.on('before-quit', () => {
-  for (const window of BrowserWindow.getAllWindows()) remote?.disposeOwner(window.webContents.id);
+  for (const window of BrowserWindow.getAllWindows()) {
+    analysis?.disposeOwner(window.webContents.id);
+    remote?.disposeOwner(window.webContents.id);
+  }
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

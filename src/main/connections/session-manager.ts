@@ -10,7 +10,7 @@ import type {
   RemoteEvent,
   RemoteTarget,
 } from '../../shared/remote';
-import { connectionBinding } from '../../shared/commands';
+import { connectionBinding, gatewayBinding } from '../../shared/commands';
 import { KnownHosts } from '../storage/known-hosts';
 import { FramedShell } from './framed-shell';
 
@@ -104,6 +104,7 @@ export class SessionManager {
     target: RemoteTarget,
     server: Server,
     auth: { password?: string; privateKey?: Buffer; passphrase?: string },
+    reuseConnectionId?: string,
   ): ConnectionView {
     for (const current of this.sessions.values()) {
       if (
@@ -121,10 +122,24 @@ export class SessionManager {
         previous.view.serverId === target.serverId &&
         ['closed', 'error'].includes(previous.view.status)
       ) {
-        previous.client.destroy();
+        this.disconnect(owner, id);
         this.sessions.delete(id);
       }
-    const client = new Client();
+    let client: Client;
+    if (reuseConnectionId) {
+      const source = this.get(owner, reuseConnectionId);
+      if (
+        server.kind !== 'jumpserver' ||
+        source.server.kind !== 'jumpserver' ||
+        source.view.projectId !== target.projectId ||
+        source.view.environmentId !== target.environmentId ||
+        gatewayBinding(source.server) !== gatewayBinding(server) ||
+        !['ready', 'awaiting-target'].includes(source.view.status) ||
+        source.pending
+      )
+        throw new Error('已登录会话不匹配或已失效，请重新连接堡垒机');
+      client = source.client;
+    } else client = new Client();
     const session: Session = {
       owner,
       server: structuredClone(server),
@@ -134,15 +149,43 @@ export class SessionManager {
       transcript: '',
     };
     this.sessions.set(session.view.id, session);
-    client.on('error', (error: Error) => {
-      if (!['closed', 'error'].includes(session.view.status))
-        this.state(session, 'error', error.message);
-      session.framed?.fail('SSH连接发生错误');
+    if (reuseConnectionId) {
+      this.state(session, 'awaiting-target');
+      this.openShell(session, true);
+      console.info('[ssh] gateway login reused', {
+        connectionId: session.view.id,
+        sourceId: reuseConnectionId,
+        serverId: server.id,
+      });
+      return { ...session.view };
+    }
+    client.on('error', (error: NodeJS.ErrnoException) => {
+      // macOS local-network permission is separate from SSH authentication; Terminal-launched tests can be exempt.
+      const message =
+        process.platform === 'darwin' && error.code === 'EHOSTUNREACH'
+          ? `尚未进入密码认证：无法连接目标网络。请在“系统设置 → 隐私与安全性 → 本地网络”中允许TraceLogDock访问，并检查内网/VPN路由。原始错误：${error.message}`
+          : error.message;
+      for (const current of this.sessions.values()) {
+        if (current.client !== client) continue;
+        if (!['closed', 'error'].includes(current.view.status)) {
+          this.state(current, 'error', message);
+          console.warn('[ssh] connection failed', {
+            connectionId: current.view.id,
+            serverId: current.server.id,
+            code: error.code,
+          });
+        }
+        current.framed?.fail('SSH连接发生错误');
+      }
     });
     client.on('close', () => {
-      session.pending = undefined;
-      session.framed?.fail('SSH连接已关闭，远端命令状态需要重新核对');
-      if (session.view.status !== 'error') this.state(session, 'closed');
+      // A transport failure affects every target PTY; closing one target below never destroys a sibling's transport.
+      for (const current of this.sessions.values()) {
+        if (current.client !== client) continue;
+        current.pending = undefined;
+        current.framed?.fail('SSH连接已关闭，远端命令状态需要重新核对');
+        if (current.view.status !== 'error') this.state(current, 'closed');
+      }
     });
     client.on('keyboard-interactive', (name, instructions, _language, prompts, finish) => {
       this.state(session, 'authenticating');
@@ -159,38 +202,7 @@ export class SessionManager {
     });
     client.on('ready', () => {
       this.state(session, server.kind === 'jumpserver' ? 'awaiting-target' : 'ready');
-      client.shell({ term: 'xterm-256color', cols: 100, rows: 28 }, (error, shell) => {
-        if (error) {
-          this.output(session, `\r\n无法打开终端：${error.message}\r\n`);
-          if (server.kind === 'jumpserver') {
-            this.state(session, 'error', 'JumpServer未提供交互终端');
-            client.end();
-          }
-          return;
-        }
-        if (['closed', 'error'].includes(session.view.status)) {
-          shell.close();
-          return;
-        }
-        session.shell = shell;
-        session.view.terminalReady = true;
-        session.framed = new FramedShell(shell);
-        const decoder = new StringDecoder('utf8');
-        shell.on('data', (data: Buffer) => {
-          const text = decoder.write(data);
-          session.framed?.feed(text);
-          this.output(session, text);
-        });
-        shell.stderr.on('data', (data: Buffer) => this.output(session, data.toString('utf8')));
-        shell.on('close', () => {
-          session.framed?.fail('目标终端已关闭，命令状态未知');
-          session.shell = undefined;
-          session.view.terminalReady = false;
-          if (server.kind === 'jumpserver' && !['closed', 'error'].includes(session.view.status))
-            this.state(session, 'error', '目标终端已关闭，请重新连接');
-        });
-        this.emit(owner, { type: 'connection', connection: { ...session.view } });
-      });
+      this.openShell(session, false);
     });
     const config: ConnectConfig = {
       host: server.host,
@@ -280,7 +292,19 @@ export class SessionManager {
     session.pending = undefined;
     this.state(session, 'closed');
     session.framed?.fail('连接已断开，远端命令状态未知');
-    session.client.destroy();
+    session.shell?.close();
+    session.shell = undefined;
+    session.view.terminalReady = false;
+    // Release only this target. The authenticated connection stays alive while any sibling target uses it.
+    if (
+      ![...this.sessions.values()].some(
+        (s) =>
+          s.client === session.client &&
+          s !== session &&
+          !['closed', 'error'].includes(s.view.status),
+      )
+    )
+      session.client.destroy();
   }
   disposeOwner(owner: number): void {
     for (const [id, session] of this.sessions)
@@ -332,14 +356,14 @@ export class SessionManager {
     return { ...session.view };
   }
 
-  private runFramed(session: Session, command: string): Promise<string> {
+  private runFramed(session: Session, command: string, timeout = 15000): Promise<string> {
     return new Promise((resolve, reject) => {
       let output = '';
       const timer = setTimeout(() => {
         if (session.framed?.started) session.framed.interrupt();
         session.framed?.fail('目标shell没有按时完成命令，请在终端检查并重新确认目标');
         this.state(session, 'awaiting-target');
-      }, 15000);
+      }, timeout);
       try {
         session.framed!.start(
           command,
@@ -358,9 +382,9 @@ export class SessionManager {
       }
     });
   }
-  execute(session: Session, command: string): Promise<string> {
+  execute(session: Session, command: string, timeout = 15000): Promise<string> {
     if (session.view.status !== 'ready') return Promise.reject(new Error('目标服务器尚未就绪'));
-    if (session.server.kind === 'jumpserver') return this.runFramed(session, command);
+    if (session.server.kind === 'jumpserver') return this.runFramed(session, command, timeout);
     return new Promise((resolve, reject) => {
       let output = '';
       let errors = '';
@@ -372,7 +396,7 @@ export class SessionManager {
         expired = true;
         channel?.close();
         reject(new Error('远程命令超时'));
-      }, 15000);
+      }, timeout);
       let channel: ClientChannel | undefined;
       session.client.exec(command, (error, stream) => {
         if (error) {
@@ -445,8 +469,12 @@ export class SessionManager {
               if (ended) return exitCode !== null;
               session.framed!.interrupt();
               await new Promise<void>((done) => {
-                complete = done;
-                const timer = setTimeout(done, 1500);
+                // JumpServer relays the remote PTY exit; give its confirmation time to return.
+                const timer = setTimeout(done, 5000);
+                complete = () => {
+                  clearTimeout(timer);
+                  done();
+                };
                 timer.unref();
               });
               if (ended) return exitCode !== null;
@@ -524,6 +552,55 @@ export class SessionManager {
           },
         });
       });
+    });
+  }
+
+  private openShell(session: Session, reused: boolean): void {
+    session.client.shell({ term: 'xterm-256color', cols: 100, rows: 28 }, (error, shell) => {
+      if (error) {
+        const message = reused
+          ? `堡垒机未能复用登录打开新目标终端，可能限制并发通道；已有目标连接保持不变。${error.message}`
+          : `无法打开终端：${error.message}`;
+        this.output(session, `\r\n${message}\r\n`);
+        if (session.server.kind === 'jumpserver') {
+          this.state(session, 'error', message);
+          if (
+            ![...this.sessions.values()].some(
+              (s) =>
+                s.client === session.client &&
+                s !== session &&
+                !['closed', 'error'].includes(s.view.status),
+            )
+          )
+            session.client.end();
+        }
+        return;
+      }
+      if (['closed', 'error'].includes(session.view.status)) {
+        shell.close();
+        return;
+      }
+      session.shell = shell;
+      session.view.terminalReady = true;
+      session.framed = new FramedShell(shell);
+      const decoder = new StringDecoder('utf8');
+      shell.on('data', (data: Buffer) => {
+        const text = decoder.write(data);
+        session.framed?.feed(text);
+        this.output(session, text);
+      });
+      shell.stderr.on('data', (data: Buffer) => this.output(session, data.toString('utf8')));
+      shell.on('close', () => {
+        session.framed?.fail('目标终端已关闭，命令状态未知');
+        session.shell = undefined;
+        session.view.terminalReady = false;
+        if (
+          session.server.kind === 'jumpserver' &&
+          !['closed', 'error'].includes(session.view.status)
+        )
+          this.state(session, 'error', '目标终端已关闭，请重新连接');
+      });
+      this.emit(session.owner, { type: 'connection', connection: { ...session.view } });
     });
   }
 }
