@@ -19,8 +19,10 @@ jobs:
         include:
           - platform: mac
             os: macos-15
+            installer: dist/release/*.dmg
           - platform: windows
             os: windows-2025
+            installer: dist/windows/*-Setup-*-x64.exe
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -63,9 +65,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-${{ matrix.platform }}
-          path: |
-            dist/release/*.dmg
-            dist/windows/*-Setup-*-x64.exe
+          path: ${{ matrix.installer }}
           if-no-files-found: error
           retention-days: 7
       - name: Save failed UI evidence
